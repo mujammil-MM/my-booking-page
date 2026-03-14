@@ -1,0 +1,58 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Booking {
+  id              String   @id @default(uuid())
+  clientName      String
+  email           String
+  phone           String
+  company         String   @default("")
+  discussionTopic String   @default("")
+  callType        String   // INTRO_15, CONSULT_30, STRATEGY_60
+  date            String   // YYYY-MM-DD
+  startTime       String   // HH:mm
+  endTime         String   // HH:mm
+  timeZone        String   @default("UTC")
+  meetingLink     String   @default("")
+  calendarEventId String   @default("")
+  status          String   @default("CONFIRMED") // CONFIRMED, CANCELLED, COMPLETED, NO_SHOW
+  rescheduleCount Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  qualification QualificationAnswer?
+  reminders     ReminderLog[]
+}
+
+model QualificationAnswer {
+  id                     String  @id @default(uuid())
+  bookingId              String  @unique
+  problem                String  @default("")
+  budgetRange            String  @default("")
+  timeline               String  @default("")
+  workedWithAgencyBefore String  @default("")
+  booking                Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+}
+
+model BlockedSlot {
+  id        String @id @default(uuid())
+  date      String // YYYY-MM-DD
+  startTime String // HH:mm
+  endTime   String // HH:mm
+  reason    String @default("")
+}
+
+model ReminderLog {
+  id           String   @id @default(uuid())
+  bookingId    String
+  type         String   // EMAIL, WHATSAPP
+  scheduledFor String   // ISO datetime
+  sentAt       DateTime?
+  booking      Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+}
