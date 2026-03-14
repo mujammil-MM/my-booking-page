@@ -20,7 +20,6 @@ export async function POST() {
       const meetingTime = new Date(`${booking.date}T${booking.startTime}:00`);
       const diff = meetingTime.getTime() - now.getTime();
       const hoursUntil = diff / (1000 * 60 * 60);
-      const minutesUntil = diff / (1000 * 60);
 
       const reminders = [
         { label: '24 hours', minHours: 23, maxHours: 25 },

@@ -3,17 +3,8 @@
 import { useEffect, useState } from 'react';
 import { BookingResponse, AnalyticsData } from '@/lib/types';
 
-function formatTime12h(time24: string): string {
-  const [h, m] = time24.split(':').map(Number);
-  const period = h >= 12 ? 'PM' : 'AM';
-  const h12 = h % 12 || 12;
-  return `${h12}:${String(m).padStart(2, '0')} ${period}`;
-}
+import { formatTime12h, formatDate } from '@/lib/utils';
 
-function formatDate(dateStr: string): string {
-  const d = new Date(dateStr + 'T00:00:00');
-  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-}
 
 function callLabel(type: string): string {
   return type === 'INTRO_15' ? '15 Min Intro'
@@ -21,26 +12,73 @@ function callLabel(type: string): string {
     : '60 Min Strategy';
 }
 
-type Tab = 'upcoming' | 'past' | 'analytics';
+type Tab = 'upcoming' | 'past' | 'analytics' | 'holidays';
 
 export default function AdminDashboard() {
   const [tab, setTab] = useState<Tab>('upcoming');
   const [bookings, setBookings] = useState<BookingResponse[]>([]);
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
+  const [holidays, setHolidays] = useState<{ id: string; date: string; note: string }[]>([]);
+  const [holidayMode, setHolidayMode] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [showHolidayModal, setShowHolidayModal] = useState(false);
+  const [newHoliday, setNewHoliday] = useState({ date: '', note: '' });
 
   const today = new Date().toISOString().split('T')[0];
+
+  const fetchHolidays = async () => {
+    const res = await fetch('/api/holidays');
+    const data = await res.json();
+    setHolidays(data);
+  };
+
+  const fetchSettings = async () => {
+    const res = await fetch('/api/settings');
+    const data = await res.json();
+    setHolidayMode(data.holidayMode);
+  };
 
   useEffect(() => {
     Promise.all([
       fetch('/api/bookings').then(r => r.json()),
       fetch('/api/analytics').then(r => r.json()),
+      fetchHolidays(),
+      fetchSettings(),
     ]).then(([bookingsData, analyticsData]) => {
       setBookings(bookingsData.bookings || []);
       setAnalytics(analyticsData);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
+
+  async function toggleHolidayMode() {
+    const nextMode = !holidayMode;
+    const res = await fetch('/api/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ holidayMode: nextMode }),
+    });
+    if (res.ok) setHolidayMode(nextMode);
+  }
+
+  async function addHoliday() {
+    if (!newHoliday.date) return;
+    const res = await fetch('/api/holidays', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newHoliday),
+    });
+    if (res.ok) {
+      fetchHolidays();
+      setShowHolidayModal(false);
+      setNewHoliday({ date: '', note: '' });
+    }
+  }
+
+  async function deleteHoliday(id: string) {
+    const res = await fetch(`/api/holidays/${id}`, { method: 'DELETE' });
+    if (res.ok) fetchHolidays();
+  }
 
   async function markStatus(id: string, status: string) {
     const res = await fetch(`/api/bookings/${id}`, {
@@ -70,11 +108,53 @@ export default function AdminDashboard() {
 
   return (
     <div className="page-container admin-container">
-      <header className="page-header">
-        <div className="badge">✦ Admin</div>
+      <header className="page-header" style={{ position: 'relative' }}>
+        <div className="admin-btn">ADMIN</div>
         <h1>Dashboard</h1>
         <p>Manage your bookings, view client details, and track analytics.</p>
+        
+        <div style={{ position: 'absolute', top: '60px', right: '0', display: 'flex', gap: '12px', alignItems: 'center' }}>
+          <button 
+            className={`btn ${holidayMode ? 'btn-danger' : 'btn-secondary'} btn-sm`}
+            onClick={toggleHolidayMode}
+          >
+            {holidayMode ? 'Holiday Mode: ON' : 'Holiday Mode: OFF'}
+          </button>
+          <button className="btn btn-primary btn-sm" onClick={() => setShowHolidayModal(true)}>
+            Add Holiday
+          </button>
+        </div>
       </header>
+
+      {/* Holiday Modal */}
+      {showHolidayModal && (
+        <div className="modal-overlay" onClick={() => setShowHolidayModal(false)}>
+          <div className="modal-content card" onClick={e => e.stopPropagation()}>
+            <h3>Add Holiday</h3>
+            <div className="form-group" style={{ marginTop: '16px' }}>
+              <label>Date</label>
+              <input 
+                type="date" 
+                value={newHoliday.date} 
+                onChange={e => setNewHoliday({ ...newHoliday, date: e.target.value })}
+              />
+            </div>
+            <div className="form-group" style={{ marginTop: '16px' }}>
+              <label>Note (Optional)</label>
+              <input 
+                type="text" 
+                placeholder="Public Holiday or Vacation"
+                value={newHoliday.note}
+                onChange={e => setNewHoliday({ ...newHoliday, note: e.target.value })}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
+              <button className="btn btn-primary btn-full" onClick={addHoliday}>Save Holiday</button>
+              <button className="btn btn-secondary btn-full" onClick={() => setShowHolidayModal(false)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Stats */}
       {analytics && (
@@ -106,6 +186,9 @@ export default function AdminDashboard() {
         <button className={`admin-tab ${tab === 'past' ? 'active' : ''}`} onClick={() => setTab('past')}>
           Past ({past.length})
         </button>
+        <button className={`admin-tab ${tab === 'holidays' ? 'active' : ''}`} onClick={() => setTab('holidays')}>
+          Holidays ({holidays.length})
+        </button>
         <button className={`admin-tab ${tab === 'analytics' ? 'active' : ''}`} onClick={() => setTab('analytics')}>
           Analytics
         </button>
@@ -127,7 +210,7 @@ export default function AdminDashboard() {
                   <span className={`status-badge ${b.status.toLowerCase().replace('_', '-')}`}>{b.status.replace('_', ' ')}</span>
                 </div>
                 <div className="booking-card-details">
-                  <div className="detail"><span className="label">Date</span><span className="value">{formatDate(b.date)}</span></div>
+                  <div className="detail"><span className="label">Date</span><span className="value">{formatDate(b.date, { weekday: 'short', month: 'short', day: 'numeric' })}</span></div>
                   <div className="detail"><span className="label">Time</span><span className="value">{formatTime12h(b.startTime)} – {formatTime12h(b.endTime)}</span></div>
                   <div className="detail"><span className="label">Type</span><span className="value">{callLabel(b.callType)}</span></div>
                   <div className="detail"><span className="label">Email</span><span className="value">{b.email}</span></div>
@@ -196,7 +279,7 @@ export default function AdminDashboard() {
                   <span className={`status-badge ${b.status.toLowerCase().replace('_', '-')}`}>{b.status.replace('_', ' ')}</span>
                 </div>
                 <div className="booking-card-details">
-                  <div className="detail"><span className="label">Date</span><span className="value">{formatDate(b.date)}</span></div>
+                  <div className="detail"><span className="label">Date</span><span className="value">{formatDate(b.date, { weekday: 'short', month: 'short', day: 'numeric' })}</span></div>
                   <div className="detail"><span className="label">Time</span><span className="value">{formatTime12h(b.startTime)}</span></div>
                   <div className="detail"><span className="label">Type</span><span className="value">{callLabel(b.callType)}</span></div>
                   <div className="detail"><span className="label">Email</span><span className="value">{b.email}</span></div>
@@ -295,7 +378,39 @@ export default function AdminDashboard() {
         </div>
       )}
 
+      {/* Holidays */}
+      {tab === 'holidays' && (
+        <div className="booking-list">
+          {holidays.length === 0 ? (
+            <div className="empty-state">
+              <div className="emoji">🏖️</div>
+              <p>No holidays scheduled</p>
+              <button className="btn btn-primary" onClick={() => setShowHolidayModal(true)} style={{ marginTop: '16px' }}>
+                Add First Holiday
+              </button>
+            </div>
+          ) : (
+            holidays.map(h => (
+              <div key={h.id} className="booking-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <h3 style={{ margin: 0 }}>{formatDate(h.date, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</h3>
+                  <p style={{ margin: '4px 0 0', color: 'var(--text-muted)', fontSize: '13px' }}>{h.note || 'No note provided'}</p>
+                </div>
+                <button 
+                  className="btn btn-secondary btn-sm" 
+                  onClick={() => deleteHoliday(h.id)}
+                  style={{ color: 'var(--danger)' }}
+                >
+                  Delete
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
       <div style={{ height: '60px' }} />
+
     </div>
   );
 }

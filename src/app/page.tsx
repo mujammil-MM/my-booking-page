@@ -7,6 +7,7 @@ import TimeSlotGrid from '@/components/TimeSlotGrid';
 import ClientInfoForm from '@/components/ClientInfoForm';
 import QualificationForm from '@/components/QualificationForm';
 import { CallType, TimeSlot } from '@/lib/types';
+import { supabase } from '@/lib/supabaseClient';
 
 export default function BookingPage() {
   const [step, setStep] = useState(1);
@@ -33,8 +34,25 @@ export default function BookingPage() {
     workedWithAgencyBefore: '',
   });
 
+  const [holidays, setHolidays] = useState<{ id: string; date: string; note: string }[]>([]);
+  const [holidayMode, setHolidayMode] = useState(false);
+  const [isHolidayToday, setIsHolidayToday] = useState(false);
+
   useEffect(() => {
     setTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone);
+    
+    // Fetch holidays and settings
+    Promise.all([
+      fetch('/api/holidays').then(r => r.json()),
+      fetch('/api/settings').then(r => r.json()),
+    ]).then(([holidaysData, settingsData]) => {
+      setHolidays(holidaysData || []);
+      setHolidayMode(settingsData.holidayMode || false);
+      
+      const todayStr = new Date().toISOString().split('T')[0];
+      const foundToday = (holidaysData || []).some((h: any) => h.date === todayStr);
+      setIsHolidayToday(foundToday);
+    });
   }, []);
 
   const fetchSlots = useCallback(async (date: string, type: CallType) => {
@@ -105,6 +123,43 @@ export default function BookingPage() {
       }
 
       const booking = await res.json();
+
+      try {
+        await supabase.from('bookings').insert({
+          name: clientInfo.clientName,
+          email: clientInfo.email,
+          phone: clientInfo.phone,
+          company: clientInfo.company,
+          call_type: callType,
+          date: selectedDate,
+          time: selectedTime,
+          meeting_link: booking.meetingLink,
+          created_at: new Date().toISOString()
+        });
+      } catch (supabaseError) {
+        console.error('Failed to save booking to Supabase:', supabaseError);
+      }
+
+      // 3. Trigger Resend Email Notification via our new secure route
+      try {
+        await fetch('/api/notify-supabase-booking', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: clientInfo.clientName,
+            email: clientInfo.email,
+            phone: clientInfo.phone,
+            company: clientInfo.company,
+            call_type: callType,
+            date: selectedDate,
+            time: selectedTime,
+            meeting_link: booking.meetingLink,
+          }),
+        });
+      } catch (notifyError) {
+        console.error('Failed to trigger Supabase email notification:', notifyError);
+      }
+
       window.location.href = `/confirmation/${booking.id}`;
     } catch {
       alert('Something went wrong. Please try again.');
@@ -122,11 +177,13 @@ export default function BookingPage() {
     clientInfo.discussionTopic &&
     qualification.problem;
 
+  const isAppDisabled = holidayMode || isHolidayToday;
+
   return (
     <div className="page-container">
       {/* Header */}
       <header className="page-header">
-        <div className="badge">✦ Schedule a Meeting</div>
+        <div className="badge">Schedule a Meeting</div>
         <h1>Book a Call</h1>
         <p>
           Choose a time that works for you. We&apos;ll discuss your project,
@@ -134,8 +191,16 @@ export default function BookingPage() {
         </p>
       </header>
 
+      {isAppDisabled && (
+        <div className="holiday-banner">
+          <div className="emoji">🏖️</div>
+          <h2>We are on holiday</h2>
+          <p>We are currently on holiday and not accepting bookings right now. Please check back later. We will update availability soon.</p>
+        </div>
+      )}
+
       {/* Progress Steps */}
-      <div className="progress-steps">
+      <div className={`progress-steps ${isAppDisabled ? 'disabled' : ''}`} style={isAppDisabled ? { opacity: 0.5, pointerEvents: 'none' } : {}}>
         <div className={`progress-step ${step >= 1 ? 'active' : ''} ${step > 1 ? 'completed' : ''}`}>
           <span className="dot" />
           Call Type
@@ -158,7 +223,7 @@ export default function BookingPage() {
       </div>
 
       {/* Step 1: Call Type */}
-      <div className="section">
+      <div className="section" style={isAppDisabled ? { opacity: 0.5, pointerEvents: 'none' } : {}}>
         <div className="section-title">
           <span className="step-number">1</span>
           Select Call Type
@@ -168,13 +233,17 @@ export default function BookingPage() {
 
       {/* Step 2: Calendar & Time */}
       {callType && (
-        <div className="section" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+        <div className="section" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', ...(isAppDisabled ? { opacity: 0.5, pointerEvents: 'none' } : {}) }}>
           <div>
             <div className="section-title">
               <span className="step-number">2</span>
               Choose Date
             </div>
-            <CalendarPicker selectedDate={selectedDate} onSelectDate={handleDateSelect} />
+            <CalendarPicker 
+              selectedDate={selectedDate} 
+              onSelectDate={handleDateSelect} 
+              blockedDates={holidays.map(h => h.date)}
+            />
           </div>
           <div>
             <div className="section-title" style={{ visibility: 'hidden' }}>
@@ -233,7 +302,7 @@ export default function BookingPage() {
                 Booking...
               </>
             ) : (
-              <>✦ Confirm Booking</>
+              <>Confirm Booking</>
             )}
           </button>
           <p style={{ fontSize: '12px', color: 'var(--text-dim)', marginTop: '12px' }}>

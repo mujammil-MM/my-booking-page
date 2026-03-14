@@ -5,6 +5,7 @@ import { useState } from 'react';
 interface Props {
   selectedDate: string | null;
   onSelectDate: (date: string) => void;
+  blockedDates?: string[];
 }
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -13,15 +14,16 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-export default function CalendarPicker({ selectedDate, onSelectDate }: Props) {
+export default function CalendarPicker({ selectedDate, onSelectDate, blockedDates = [] }: Props) {
   const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayStr = today.toISOString().split('T')[0];
+
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
 
   const firstDay = new Date(viewYear, viewMonth, 1).getDay();
-  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
-
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const daysInMonthCount = new Date(viewYear, viewMonth + 1, 0).getDate();
 
   function prevMonth() {
     if (viewMonth === 0) {
@@ -41,20 +43,35 @@ export default function CalendarPicker({ selectedDate, onSelectDate }: Props) {
     }
   }
 
-  function isDisabled(day: number): boolean {
-    const d = new Date(viewYear, viewMonth, day);
-    const dayOfWeek = d.getDay();
-    // Weekend
-    if (dayOfWeek === 0 || dayOfWeek === 6) return true;
-    // Past
-    const t = new Date();
-    t.setHours(0, 0, 0, 0);
-    if (d < t) return true;
-    return false;
+  const days = [];
+  // Empty slots
+  for (let i = 0; i < firstDay; i++) {
+    days.push(<div key={`empty-${i}`} className="day empty" />);
   }
 
-  function dateStr(day: number): string {
-    return `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  // Days
+  for (let d = 1; d <= daysInMonthCount; d++) {
+    const date = new Date(viewYear, viewMonth, d);
+    const dateStr = date.toISOString().split('T')[0];
+    const isPast = date < today;
+    const isSelected = selectedDate === dateStr;
+    const isToday = todayStr === dateStr;
+    const isBlocked = blockedDates.includes(dateStr);
+    const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+
+    const isDisabled = isPast || isBlocked || isWeekend;
+
+    days.push(
+      <button
+        key={d}
+        type="button"
+        className={`day ${isSelected ? 'selected' : ''} ${isToday ? 'today' : ''} ${isDisabled ? 'disabled' : ''}`}
+        onClick={() => !isDisabled && onSelectDate(dateStr)}
+        disabled={isDisabled}
+      >
+        {d}
+      </button>
+    );
   }
 
   const canGoPrev = viewYear > today.getFullYear() || viewMonth > today.getMonth();
@@ -62,39 +79,18 @@ export default function CalendarPicker({ selectedDate, onSelectDate }: Props) {
   return (
     <div className="calendar-container">
       <div className="calendar-nav">
-        <button onClick={prevMonth} disabled={!canGoPrev} style={{ opacity: canGoPrev ? 1 : 0.3 }}>
+        <button type="button" onClick={prevMonth} disabled={!canGoPrev} style={{ opacity: canGoPrev ? 1 : 0.3 }}>
           ‹
         </button>
         <h3>{MONTH_NAMES[viewMonth]} {viewYear}</h3>
-        <button onClick={nextMonth}>›</button>
+        <button type="button" onClick={nextMonth}>›</button>
       </div>
 
       <div className="calendar-grid">
-        {DAY_LABELS.map(d => (
-          <div key={d} className="day-label">{d}</div>
+        {DAY_LABELS.map(label => (
+          <div key={label} className="day-label">{label}</div>
         ))}
-
-        {Array.from({ length: firstDay }, (_, i) => (
-          <div key={`empty-${i}`} className="day empty" />
-        ))}
-
-        {Array.from({ length: daysInMonth }, (_, i) => {
-          const day = i + 1;
-          const ds = dateStr(day);
-          const disabled = isDisabled(day);
-          const isToday = ds === todayStr;
-          const isSelected = ds === selectedDate;
-
-          return (
-            <div
-              key={day}
-              className={`day ${disabled ? 'disabled' : ''} ${isToday ? 'today' : ''} ${isSelected ? 'selected' : ''}`}
-              onClick={() => !disabled && onSelectDate(ds)}
-            >
-              {day}
-            </div>
-          );
-        })}
+        {days}
       </div>
     </div>
   );

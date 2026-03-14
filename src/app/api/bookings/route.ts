@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { calculateEndTime } from '@/lib/availability';
 import { createCalendarEvent } from '@/lib/calendar';
-import { sendConfirmationEmail } from '@/lib/email';
+import { sendConfirmationEmail, sendAdminNotificationEmail } from '@/lib/email';
+import { sendAdminSMS } from '@/lib/sms';
 import { CallType } from '@/lib/types';
 
 export async function GET(req: NextRequest) {
@@ -126,6 +127,34 @@ export async function POST(req: NextRequest) {
       });
     } catch (emailError) {
       console.error('Failed to send confirmation email:', emailError);
+    }
+
+    // Send admin notification email
+    try {
+      await sendAdminNotificationEmail({
+        clientName: booking.clientName,
+        email: booking.email,
+        phone: booking.phone,
+        company: booking.company || '',
+        callType: booking.callType,
+        date: booking.date,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        meetingLink: booking.meetingLink,
+      });
+    } catch (adminEmailError) {
+      console.error('Failed to send admin notification email:', adminEmailError);
+    }
+
+    // Send admin SMS notification
+    try {
+      await sendAdminSMS({
+        clientName: booking.clientName,
+        date: booking.date,
+        startTime: booking.startTime,
+      });
+    } catch (smsError) {
+      console.error('Failed to send admin SMS:', smsError);
     }
 
     return NextResponse.json(booking, { status: 201 });

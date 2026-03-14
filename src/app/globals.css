@@ -98,7 +98,6 @@ body::before {
 .page-header .badge {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
   padding: 6px 16px;
   background: var(--accent-glow);
   border: 1px solid var(--border-accent);
@@ -109,6 +108,28 @@ body::before {
   text-transform: uppercase;
   letter-spacing: 1px;
   margin-bottom: 20px;
+}
+
+.admin-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 18px;
+  background: #121214;
+  border: 1px solid #27272a;
+  border-radius: 100px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fafafa;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  margin-bottom: 24px;
+  cursor: default;
+  transition: all var(--transition-fast);
+}
+
+.admin-btn:hover {
+  background: #1a1a1d;
+  border-color: #3f3f46;
 }
 
 .page-header h1 {
@@ -797,6 +818,62 @@ body::before {
   background: rgba(99, 102, 241, 0.15);
   color: var(--accent-primary);
   border: 1px solid var(--border-accent);
+}
+
+/* ========== MODAL ========== */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 24px;
+}
+
+.modal-content {
+  width: 100%;
+  max-width: 480px;
+  animation: modalIn 0.3s ease;
+}
+
+@keyframes modalIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.holiday-banner {
+  background: var(--bg-card);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-lg);
+  padding: 40px;
+  text-align: center;
+  margin-bottom: 40px;
+  box-shadow: var(--shadow-glow);
+}
+
+.holiday-banner .emoji {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.holiday-banner h2 {
+  font-size: 28px;
+  font-weight: 800;
+  margin-bottom: 12px;
+  color: var(--text-primary);
+}
+
+.holiday-banner p {
+  color: var(--text-secondary);
+  font-size: 16px;
+  line-height: 1.6;
 }
 
 .status-badge.no-show {

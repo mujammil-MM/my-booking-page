@@ -1,31 +1,27 @@
 import nodemailer from 'nodemailer';
 import { formatTime12h, formatDate } from './availability';
 
-const transporter = process.env.SMTP_PASS
-  ? nodemailer.createTransport({
-      host: process.env.SMTP_HOST || 'smtp.gmail.com',
-      port: parseInt(process.env.SMTP_PORT || '587'),
-      secure: false,
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    })
-  : null;
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: parseInt(process.env.SMTP_PORT || '465'),
+  secure: process.env.SMTP_SECURE === 'true',
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+});
 
 async function sendMail(to: string, subject: string, html: string) {
-  if (transporter) {
-    await transporter.sendMail({
-      from: `"Book a Call" <${process.env.SMTP_USER || 'noreply@example.com'}>`,
+  try {
+    const info = await transporter.sendMail({
+      from: process.env.SMTP_FROM || `"Book a Call" <${process.env.SMTP_USER}>`,
       to,
       subject,
       html,
     });
-  } else {
-    console.log('📧 [EMAIL DEV MODE]');
-    console.log(`  To:      ${to}`);
-    console.log(`  Subject: ${subject}`);
-    console.log(`  Body:    ${html.replace(/<[^>]*>/g, '').substring(0, 200)}...`);
+    console.log('Message sent: %s', info.messageId);
+  } catch (error) {
+    console.error('SMTP error:', error);
   }
 }
 
@@ -143,3 +139,53 @@ export async function sendCancellationEmail(booking: {
 
   await sendMail(booking.email, `Booking Cancelled: ${formattedDate}`, html);
 }
+
+export async function sendAdminNotificationEmail(booking: {
+  clientName: string;
+  email: string;
+  phone: string;
+  company: string;
+  callType: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  meetingLink: string;
+}) {
+  const adminEmail = process.env.ADMIN_EMAIL || 'nova.rosehearts@gmail.com';
+  const formattedDate = formatDate(booking.date);
+  const formattedStart = formatTime12h(booking.startTime);
+  const formattedEnd = formatTime12h(booking.endTime);
+
+  const callLabel =
+    booking.callType === 'INTRO_15'
+      ? '15 Min Intro Call'
+      : booking.callType === 'CONSULT_30'
+      ? '30 Min Consultation'
+      : '60 Min Strategy Session';
+
+  const html = `
+    <div style="font-family:'Inter',sans-serif;max-width:600px;margin:0 auto;background:#f8fafc;color:#0f172a;border-radius:12px;padding:24px;border:1px solid #e2e8f0;">
+      <h2 style="margin-top:0;color:#334155;">New Booking Received</h2>
+      <p>A new call has been booked. Here are the details:</p>
+      
+      <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:16px;margin:16px 0;">
+        <p style="margin:4px 0;"><strong>Client Name:</strong> ${booking.clientName}</p>
+        <p style="margin:4px 0;"><strong>Email:</strong> <a href="mailto:${booking.email}">${booking.email}</a></p>
+        <p style="margin:4px 0;"><strong>Phone:</strong> ${booking.phone}</p>
+        <p style="margin:4px 0;"><strong>Company:</strong> ${booking.company || 'N/A'}</p>
+        <p style="margin:4px 0;"><strong>Call Type:</strong> ${callLabel}</p>
+        <p style="margin:4px 0;"><strong>Date:</strong> ${formattedDate}</p>
+        <p style="margin:4px 0;"><strong>Time:</strong> ${formattedStart} – ${formattedEnd}</p>
+      </div>
+
+      ${booking.meetingLink ? `
+      <p style="margin-top:16px;">
+        <strong>Meeting Link:</strong> <a href="${booking.meetingLink}">${booking.meetingLink}</a>
+      </p>
+      ` : ''}
+    </div>
+  `;
+
+  await sendMail(adminEmail, `New call booked`, html);
+}
+

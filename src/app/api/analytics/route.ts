@@ -43,6 +43,7 @@ export async function GET() {
 
     return NextResponse.json({
       totalBookings: total,
+      confirmedBookings: confirmed,
       upcomingBookings: upcoming,
       completedBookings: completed,
       cancelledBookings: cancelled,

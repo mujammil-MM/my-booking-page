@@ -1,0 +1,34 @@
+import { NextRequest, NextResponse } from 'next/server';
+import prisma from '@/lib/prisma';
+
+export async function GET() {
+  try {
+    const holidays = await prisma.holiday.findMany({
+      orderBy: { date: 'asc' },
+    });
+    return NextResponse.json(holidays);
+  } catch (error) {
+    console.error('Failed to fetch holidays:', error);
+    return NextResponse.json({ error: 'Failed to fetch holidays' }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const { date, note } = await req.json();
+    if (!date) {
+      return NextResponse.json({ error: 'Date is required' }, { status: 400 });
+    }
+
+    const holiday = await prisma.holiday.create({
+      data: { date, note: note || '' },
+    });
+    return NextResponse.json(holiday, { status: 201 });
+  } catch (error: any) {
+    if (error.code === 'P2002') {
+      return NextResponse.json({ error: 'Holiday already exists for this date' }, { status: 409 });
+    }
+    console.error('Failed to create holiday:', error);
+    return NextResponse.json({ error: 'Failed to create holiday' }, { status: 500 });
+  }
+}

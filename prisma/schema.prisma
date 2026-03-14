@@ -48,6 +48,19 @@ model BlockedSlot {
   reason    String @default("")
 }
 
+model Holiday {
+  id        String   @id @default(uuid())
+  date      String   @unique // YYYY-MM-DD
+  note      String   @default("")
+  createdAt DateTime @default(now())
+}
+
+model GlobalSettings {
+  id             String  @id @default("default")
+  holidayMode    Boolean @default(false)
+  updatedAt      DateTime @updatedAt
+}
+
 model ReminderLog {
   id           String   @id @default(uuid())
   bookingId    String

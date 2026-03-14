@@ -4,17 +4,8 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { BookingResponse } from '@/lib/types';
 
-function formatTime12h(time24: string): string {
-  const [h, m] = time24.split(':').map(Number);
-  const period = h >= 12 ? 'PM' : 'AM';
-  const h12 = h % 12 || 12;
-  return `${h12}:${String(m).padStart(2, '0')} ${period}`;
-}
+import { formatTime12h, formatDate } from '@/lib/utils';
 
-function formatDate(dateStr: string): string {
-  const d = new Date(dateStr + 'T00:00:00');
-  return d.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-}
 
 export default function CancelPage() {
   const params = useParams();

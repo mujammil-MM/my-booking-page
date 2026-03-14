@@ -51,6 +51,7 @@ export async function createCalendarEvent(booking: {
     const event = await calendar.events.insert({
       calendarId,
       conferenceDataVersion: 1,
+      sendUpdates: 'all',
       requestBody: {
         summary: `${callLabel} with ${booking.clientName}`,
         description: `Discussion: ${booking.discussionTopic}\nEmail: ${booking.email}`,
