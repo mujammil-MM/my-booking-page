@@ -1,6 +1,4 @@
-'use client';
-
-import { useState } from 'react';
+import { useState, memo } from 'react';
 
 interface Props {
   selectedDate: string | null;
@@ -14,7 +12,7 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-export default function CalendarPicker({ selectedDate, onSelectDate, blockedDates = [] }: Props) {
+const CalendarPicker = memo(({ selectedDate, onSelectDate, blockedDates = [] }: Props) => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const todayStr = today.toISOString().split('T')[0];
@@ -46,7 +44,7 @@ export default function CalendarPicker({ selectedDate, onSelectDate, blockedDate
   const days = [];
   // Empty slots
   for (let i = 0; i < firstDay; i++) {
-    days.push(<div key={`empty-${i}`} className="day empty" />);
+    days.push(<div key={`empty-${viewYear}-${viewMonth}-${i}`} className="day empty" />);
   }
 
   // Days
@@ -63,7 +61,7 @@ export default function CalendarPicker({ selectedDate, onSelectDate, blockedDate
 
     days.push(
       <button
-        key={d}
+        key={`${viewYear}-${viewMonth}-${d}`}
         type="button"
         className={`day ${isSelected ? 'selected' : ''} ${isToday ? 'today' : ''} ${isDisabled ? 'disabled' : ''}`}
         onClick={() => !isDisabled && onSelectDate(dateStr)}
@@ -94,4 +92,8 @@ export default function CalendarPicker({ selectedDate, onSelectDate, blockedDate
       </div>
     </div>
   );
-}
+});
+
+CalendarPicker.displayName = 'CalendarPicker';
+
+export default CalendarPicker;

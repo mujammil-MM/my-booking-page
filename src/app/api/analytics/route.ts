@@ -5,46 +5,54 @@ export async function GET() {
   try {
     const today = new Date().toISOString().split('T')[0];
 
-    const [total, confirmed, cancelled, noShow, completed, allBookings] = await Promise.all([
-      prisma.booking.count(),
-      prisma.booking.count({ where: { status: 'CONFIRMED' } }),
-      prisma.booking.count({ where: { status: 'CANCELLED' } }),
-      prisma.booking.count({ where: { status: 'NO_SHOW' } }),
-      prisma.booking.count({ where: { status: 'COMPLETED' } }),
-      prisma.booking.findMany({
+    // Use aggregations for faster computation
+    const [counts, popularSlotsRaw, typeCountsRaw, upcomingCount] = await Promise.all([
+      prisma.booking.groupBy({
+        by: ['status'],
+        _count: { _all: true },
+      }),
+      prisma.booking.groupBy({
+        by: ['startTime'],
         where: { status: { not: 'CANCELLED' } },
-        select: { startTime: true, callType: true },
+        _count: { _all: true },
+        orderBy: { _count: { startTime: 'desc' } },
+        take: 5,
+      }),
+      prisma.booking.groupBy({
+        by: ['callType'],
+        _count: { _all: true },
+      }),
+      prisma.booking.count({
+        where: { status: 'CONFIRMED', date: { gte: today } },
       }),
     ]);
 
-    // Popular time slots
-    const timeCount: Record<string, number> = {};
-    allBookings.forEach(b => {
-      timeCount[b.startTime] = (timeCount[b.startTime] || 0) + 1;
+    const statusCounts: Record<string, number> = {};
+    counts.forEach(c => {
+      statusCounts[c.status] = c._count._all;
     });
-    const popularSlots = Object.entries(timeCount)
-      .map(([time, count]) => ({ time, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 5);
 
-    // Bookings by type
-    const typeCount: Record<string, number> = {};
-    allBookings.forEach(b => {
-      typeCount[b.callType] = (typeCount[b.callType] || 0) + 1;
-    });
-    const bookingsByType = Object.entries(typeCount).map(([type, count]) => ({ type, count }));
+    const total = Object.values(statusCounts).reduce((a, b) => a + b, 0);
+    const cancelled = statusCounts['CANCELLED'] || 0;
+    const noShow = statusCounts['NO_SHOW'] || 0;
+    const completed = statusCounts['COMPLETED'] || 0;
+
+    const popularSlots = popularSlotsRaw.map(s => ({
+      time: s.startTime,
+      count: s._count._all,
+    }));
+
+    const bookingsByType = typeCountsRaw.map(t => ({
+      type: t.callType,
+      count: t._count._all,
+    }));
 
     const cancellationRate = total > 0 ? Math.round((cancelled / total) * 100) : 0;
     const noShowRate = total > 0 ? Math.round((noShow / total) * 100) : 0;
 
-    const upcoming = await prisma.booking.count({
-      where: { status: 'CONFIRMED', date: { gte: today } },
-    });
-
     return NextResponse.json({
       totalBookings: total,
-      confirmedBookings: confirmed,
-      upcomingBookings: upcoming,
+      upcomingBookings: upcomingCount,
       completedBookings: completed,
       cancelledBookings: cancelled,
       noShowBookings: noShow,

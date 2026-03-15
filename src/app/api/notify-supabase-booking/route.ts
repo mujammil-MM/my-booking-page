@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Resend } from 'resend';
+import { toDate, formatInTimeZone } from 'date-fns-tz';
 
 // Initialize the explicitly requested API key for this route
 const resend = new Resend('re_PsH1uH9b_N5PXrR9kUPtWj6Pzz9dYrbaX');
@@ -7,11 +8,21 @@ const resend = new Resend('re_PsH1uH9b_N5PXrR9kUPtWj6Pzz9dYrbaX');
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { name, email, phone, company, call_type, date, time, meeting_link } = body;
+    const { 
+      name, email, phone, company, call_type, date, time, meeting_link,
+      discussion, problem, budget, timeline, prior_agency, timezone
+    } = body;
 
     if (!name || !email || !date || !time) {
       return NextResponse.json({ error: 'Missing required booking details for notification' }, { status: 400 });
     }
+
+    const ADMIN_TZ = 'Asia/Kolkata';
+    
+    // date and time are roughly UTC from the frontend now
+    const utcDate = toDate(`${date}T${time}:00`, { timeZone: 'UTC' });
+    const formattedDate = formatInTimeZone(utcDate, ADMIN_TZ, 'EEEE, MMMM d, yyyy');
+    const formattedTime = formatInTimeZone(utcDate, ADMIN_TZ, 'hh:mm a');
 
     const callLabel =
       call_type === 'INTRO_15'
@@ -30,9 +41,16 @@ export async function POST(req: NextRequest) {
           <p style="margin:4px 0;"><strong>Email:</strong> <a href="mailto:${email}">${email}</a></p>
           <p style="margin:4px 0;"><strong>Phone:</strong> ${phone || 'N/A'}</p>
           <p style="margin:4px 0;"><strong>Company:</strong> ${company || 'N/A'}</p>
+          <p style="margin:4px 0;"><strong>Timezone:</strong> ${timezone || 'Unknown timezone'}</p>
           <p style="margin:4px 0;"><strong>Call Type:</strong> ${callLabel}</p>
-          <p style="margin:4px 0;"><strong>Date:</strong> ${date}</p>
-          <p style="margin:4px 0;"><strong>Time:</strong> ${time}</p>
+          <p style="margin:4px 0;"><strong>Date:</strong> ${formattedDate}</p>
+          <p style="margin:4px 0;"><strong>Time:</strong> ${formattedTime} (${ADMIN_TZ})</p>
+          <hr style="border:0;border-top:1px solid #e2e8f0;margin:12px 0;">
+          <p style="margin:4px 0;"><strong>Discussion:</strong> ${discussion || 'Not provided'}</p>
+          <p style="margin:4px 0;"><strong>Problem:</strong> ${problem || 'Not provided'}</p>
+          <p style="margin:4px 0;"><strong>Budget:</strong> ${budget || 'Not provided'}</p>
+          <p style="margin:4px 0;"><strong>Timeline:</strong> ${timeline || 'Not provided'}</p>
+          <p style="margin:4px 0;"><strong>Prior Agency:</strong> ${prior_agency || 'Not provided'}</p>
         </div>
 
         ${meeting_link ? `

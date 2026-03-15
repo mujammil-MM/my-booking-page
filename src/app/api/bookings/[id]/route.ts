@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { calculateEndTime } from '@/lib/availability';
 import { deleteCalendarEvent, updateCalendarEvent } from '@/lib/calendar';
 import { sendCancellationEmail } from '@/lib/email';
-import { CallType } from '@/lib/types';
+import { CallType, getCallDuration } from '@/lib/types';
+import { toDate } from 'date-fns-tz';
+import { addMinutes, format } from 'date-fns';
 
 export async function GET(
   req: NextRequest,
@@ -41,10 +42,22 @@ export async function PATCH(
       return NextResponse.json({ error: 'Maximum reschedules reached (2)' }, { status: 400 });
     }
 
-    // Check 2-hour cutoff
-    const meetingDateTime = new Date(`${booking.date}T${booking.startTime}:00`);
+    const clientTz = body.timeZone || booking.timeZone || 'UTC';
+    const duration = getCallDuration(booking.callType as CallType);
+
+    // Normalize incoming local time to UTC
+    const startDateTimeUTC = toDate(`${body.date}T${body.startTime}:00`, { timeZone: clientTz });
+    const utcDate = format(startDateTimeUTC, 'yyyy-MM-dd');
+    const utcStart = format(startDateTimeUTC, 'HH:mm');
+    
+    const endDateTimeUTC = addMinutes(startDateTimeUTC, duration);
+    const utcEnd = format(endDateTimeUTC, 'HH:mm');
+    const utcEndDate = format(endDateTimeUTC, 'yyyy-MM-dd');
+
+    // Check 2-hour cutoff (using normalized UTC)
+    const currentMeetingUTC = toDate(`${booking.date}T${booking.startTime}:00`, { timeZone: 'UTC' });
     const now = new Date();
-    const hoursUntil = (meetingDateTime.getTime() - now.getTime()) / (1000 * 60 * 60);
+    const hoursUntil = (currentMeetingUTC.getTime() - now.getTime()) / (1000 * 60 * 60);
     if (hoursUntil < 2) {
       return NextResponse.json(
         { error: 'Cannot reschedule within 2 hours of the meeting' },
@@ -52,19 +65,29 @@ export async function PATCH(
       );
     }
 
-    const endTime = calculateEndTime(body.startTime, booking.callType as CallType);
-
-    // Check for conflicts on new date/time
+    // Check for conflicts on new date/time (UTC)
     const conflict = await prisma.booking.findFirst({
       where: {
         id: { not: id },
-        date: body.date,
         status: { not: 'CANCELLED' },
         OR: [
-          { startTime: { lte: body.startTime }, endTime: { gt: body.startTime } },
-          { startTime: { lt: endTime }, endTime: { gte: endTime } },
-          { startTime: { gte: body.startTime }, endTime: { lte: endTime } },
-        ],
+          {
+            date: utcDate,
+            OR: [
+              { startTime: { lte: utcStart }, endTime: { gt: utcStart } },
+              { startTime: { lt: utcEnd }, endTime: { gte: utcEnd } },
+              { startTime: { gte: utcStart }, endTime: { lte: utcEnd } },
+            ]
+          },
+          {
+            date: utcEndDate,
+            OR: [
+              { startTime: { lte: utcStart }, endTime: { gt: utcStart } },
+              { startTime: { lt: utcEnd }, endTime: { gte: utcEnd } },
+              { startTime: { gte: utcStart }, endTime: { lte: utcEnd } },
+            ]
+          }
+        ]
       },
     });
 
@@ -75,9 +98,9 @@ export async function PATCH(
     // Update calendar event
     if (booking.calendarEventId) {
       await updateCalendarEvent(booking.calendarEventId, {
-        date: body.date,
-        startTime: body.startTime,
-        endTime,
+        date: utcDate,
+        startTime: utcStart,
+        endTime: utcEnd,
         clientName: booking.clientName,
       });
     }
@@ -85,9 +108,10 @@ export async function PATCH(
     const updated = await prisma.booking.update({
       where: { id },
       data: {
-        date: body.date,
-        startTime: body.startTime,
-        endTime,
+        date: utcDate,
+        startTime: utcStart,
+        endTime: utcEnd,
+        timeZone: clientTz,
         rescheduleCount: { increment: 1 },
       },
       include: { qualification: true },
@@ -96,7 +120,7 @@ export async function PATCH(
     return NextResponse.json(updated);
   }
 
-  // Handle status updates (e.g., mark as no-show, completed)
+  // Handle status updates
   if (body.status) {
     const updated = await prisma.booking.update({
       where: { id },
@@ -138,6 +162,7 @@ export async function DELETE(
       email: booking.email,
       date: booking.date,
       startTime: booking.startTime,
+      timeZone: booking.timeZone,
     });
   } catch (err) {
     console.error('Failed to send cancellation email:', err);

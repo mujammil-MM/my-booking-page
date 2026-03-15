@@ -28,6 +28,10 @@ model Booking {
 
   qualification QualificationAnswer?
   reminders     ReminderLog[]
+
+  @@index([date])
+  @@index([status])
+  @@index([createdAt])
 }
 
 model QualificationAnswer {
@@ -46,6 +50,8 @@ model BlockedSlot {
   startTime String // HH:mm
   endTime   String // HH:mm
   reason    String @default("")
+
+  @@index([date])
 }
 
 model Holiday {
@@ -53,6 +59,8 @@ model Holiday {
   date      String   @unique // YYYY-MM-DD
   note      String   @default("")
   createdAt DateTime @default(now())
+
+  @@index([date])
 }
 
 model GlobalSettings {
@@ -68,4 +76,7 @@ model ReminderLog {
   scheduledFor String   // ISO datetime
   sentAt       DateTime?
   booking      Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId])
+  @@index([scheduledFor])
 }

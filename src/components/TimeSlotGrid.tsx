@@ -1,5 +1,4 @@
-'use client';
-
+import { memo } from 'react';
 import { TimeSlot } from '@/lib/types';
 
 interface Props {
@@ -17,7 +16,7 @@ function formatTime12h(time24: string): string {
   return `${h12}:${String(m).padStart(2, '0')} ${period}`;
 }
 
-export default function TimeSlotGrid({ slots, selectedTime, onSelectTime, loading, timeZone }: Props) {
+const TimeSlotGrid = memo(({ slots, selectedTime, onSelectTime, loading, timeZone }: Props) => {
   if (loading) {
     return (
       <div className="time-slots-container">
@@ -66,4 +65,8 @@ export default function TimeSlotGrid({ slots, selectedTime, onSelectTime, loadin
       </div>
     </div>
   );
-}
+});
+
+TimeSlotGrid.displayName = 'TimeSlotGrid';
+
+export default TimeSlotGrid;

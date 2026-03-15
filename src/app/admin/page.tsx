@@ -1,9 +1,21 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { BookingResponse, AnalyticsData } from '@/lib/types';
 
 import { formatTime12h, formatDate } from '@/lib/utils';
+import { 
+  LineChart, 
+  Line, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer,
+  Area,
+  AreaChart
+} from 'recharts';
 
 
 function callLabel(type: string): string {
@@ -16,15 +28,51 @@ type Tab = 'upcoming' | 'past' | 'analytics' | 'holidays';
 
 export default function AdminDashboard() {
   const [tab, setTab] = useState<Tab>('upcoming');
+  const [adminTz, setAdminTz] = useState('UTC');
+  
+  useEffect(() => {
+    setAdminTz(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  }, []);
+
   const [bookings, setBookings] = useState<BookingResponse[]>([]);
+  const [totalBookings, setTotalBookings] = useState(0);
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [holidays, setHolidays] = useState<{ id: string; date: string; note: string }[]>([]);
   const [holidayMode, setHolidayMode] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [bookingsLoading, setBookingsLoading] = useState(false);
   const [showHolidayModal, setShowHolidayModal] = useState(false);
   const [newHoliday, setNewHoliday] = useState({ date: '', note: '' });
+  const [page, setPage] = useState(0);
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [dailyData, setDailyData] = useState<{ date: string; count: number; displayDate: string }[]>([]);
+  const limit = 20;
+  const router = useRouter();
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(0); // Reset to first page on search
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   const today = new Date().toISOString().split('T')[0];
+
+  const fetchBookings = async (offset: number, query: string) => {
+    setBookingsLoading(true);
+    try {
+      const res = await fetch(`/api/bookings?limit=${limit}&offset=${offset}&q=${encodeURIComponent(query)}`);
+      const data = await res.json();
+      setBookings(data.bookings || []);
+      setTotalBookings(data.totalCount || 0);
+    } catch (err) {
+      console.error('Failed to fetch bookings:', err);
+    } finally {
+      setBookingsLoading(false);
+    }
+  };
 
   const fetchHolidays = async () => {
     const res = await fetch('/api/holidays');
@@ -38,18 +86,35 @@ export default function AdminDashboard() {
     setHolidayMode(data.holidayMode);
   };
 
+  const fetchAnalytics = async () => {
+    const res = await fetch('/api/analytics');
+    const data = await res.json();
+    setAnalytics(data);
+
+    // Also fetch daily data
+    const resDaily = await fetch('/api/analytics/daily');
+    const dataDaily = await resDaily.json();
+    setDailyData(dataDaily);
+  };
+
   useEffect(() => {
+    // Initial load: Fetch essential data first
     Promise.all([
-      fetch('/api/bookings').then(r => r.json()),
-      fetch('/api/analytics').then(r => r.json()),
-      fetchHolidays(),
+      fetchBookings(0, debouncedSearch),
       fetchSettings(),
-    ]).then(([bookingsData, analyticsData]) => {
-      setBookings(bookingsData.bookings || []);
-      setAnalytics(analyticsData);
+    ]).then(() => {
       setLoading(false);
+      // Secondary load: Analytics and holidays can load in background
+      fetchAnalytics();
+      fetchHolidays();
     }).catch(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!loading) {
+      fetchBookings(page * limit, debouncedSearch);
+    }
+  }, [page, debouncedSearch]);
 
   async function toggleHolidayMode() {
     const nextMode = !holidayMode;
@@ -92,6 +157,14 @@ export default function AdminDashboard() {
     }
   }
 
+  async function handleLogout() {
+    const res = await fetch('/api/admin/logout', { method: 'POST' });
+    if (res.ok) {
+      router.push('/admin-login');
+      router.refresh();
+    }
+  }
+
   const upcoming = bookings.filter(b => b.status === 'CONFIRMED' && b.date >= today);
   const past = bookings.filter(b => b.date < today || b.status !== 'CONFIRMED');
 
@@ -122,6 +195,21 @@ export default function AdminDashboard() {
           </button>
           <button className="btn btn-primary btn-sm" onClick={() => setShowHolidayModal(true)}>
             Add Holiday
+          </button>
+          <button 
+            className="btn btn-secondary btn-sm" 
+            onClick={handleLogout}
+            style={{ 
+              opacity: 0.5, 
+              fontSize: '11px', 
+              background: 'transparent', 
+              border: 'none', 
+              padding: '4px 8px',
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px'
+            }}
+          >
+            Logout
           </button>
         </div>
       </header>
@@ -157,26 +245,65 @@ export default function AdminDashboard() {
       )}
 
       {/* Stats */}
-      {analytics && (
-        <div className="admin-stats">
-          <div className="stat-card">
-            <div className="stat-value">{analytics.totalBookings}</div>
-            <div className="stat-label">Total Bookings</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-value">{analytics.upcomingBookings}</div>
-            <div className="stat-label">Upcoming</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-value">{analytics.cancellationRate}%</div>
-            <div className="stat-label">Cancellation Rate</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-value">{analytics.noShowRate}%</div>
-            <div className="stat-label">No-Show Rate</div>
-          </div>
+      <div className="admin-stats">
+        {!analytics ? (
+          <>
+            {[1, 2, 3, 4].map(i => <div key={i} className="skeleton stat-card" style={{ height: 100 }} />)}
+          </>
+        ) : (
+          <>
+            <div className="stat-card">
+              <div className="stat-value">{analytics.totalBookings}</div>
+              <div className="stat-label">Total Bookings</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-value">{analytics.upcomingBookings}</div>
+              <div className="stat-label">Upcoming</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-value">{analytics.cancellationRate}%</div>
+              <div className="stat-label">Cancellation Rate</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-value">{analytics.noShowRate}%</div>
+              <div className="stat-label">No-Show Rate</div>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="pagination-controls" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '24px', marginBottom: '32px' }}>
+        <div className="search-container-glass">
+          <input 
+            type="text" 
+            placeholder="Search bookings by name, email, date, or company..." 
+            className="search-input-glass" 
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+          <span className="search-icon-glass">🔍</span>
         </div>
-      )}
+
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button 
+            className="btn btn-secondary btn-sm" 
+            disabled={page === 0}
+            onClick={() => setPage(p => Math.max(0, p - 1))}
+          >
+            Previous
+          </button>
+          <span style={{ fontSize: '13px', color: 'var(--text-secondary)', alignSelf: 'center' }}>
+            Page {page + 1} of {Math.ceil(totalBookings / limit) || 1}
+          </span>
+          <button 
+            className="btn btn-secondary btn-sm" 
+            disabled={(page + 1) * limit >= totalBookings}
+            onClick={() => setPage(p => p + 1)}
+          >
+            Next
+          </button>
+        </div>
+      </div>
 
       {/* Tabs */}
       <div className="admin-tabs">
@@ -197,7 +324,11 @@ export default function AdminDashboard() {
       {/* Upcoming */}
       {tab === 'upcoming' && (
         <div className="booking-list">
-          {upcoming.length === 0 ? (
+          {bookingsLoading ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {[1, 2, 3].map(i => <div key={i} className="skeleton booking-card" style={{ height: 200 }} />)}
+            </div>
+          ) : upcoming.length === 0 ? (
             <div className="empty-state">
               <div className="emoji">📭</div>
               <p>No upcoming bookings</p>
@@ -210,49 +341,52 @@ export default function AdminDashboard() {
                   <span className={`status-badge ${b.status.toLowerCase().replace('_', '-')}`}>{b.status.replace('_', ' ')}</span>
                 </div>
                 <div className="booking-card-details">
-                  <div className="detail"><span className="label">Date</span><span className="value">{formatDate(b.date, { weekday: 'short', month: 'short', day: 'numeric' })}</span></div>
-                  <div className="detail"><span className="label">Time</span><span className="value">{formatTime12h(b.startTime)} – {formatTime12h(b.endTime)}</span></div>
+                  <div className="detail"><span className="label">Date</span><span className="value">{formatDate(b.date, adminTz)}</span></div>
+                  <div className="detail"><span className="label">Time</span><span className="value">{formatTime12h(b.startTime, b.date, adminTz)} – {formatTime12h(b.endTime, b.date, adminTz)}</span></div>
+                  <div className="detail"><span className="label">Client Timezone</span><span className="value">{b.timeZone || 'Unknown timezone'}</span></div>
                   <div className="detail"><span className="label">Type</span><span className="value">{callLabel(b.callType)}</span></div>
                   <div className="detail"><span className="label">Email</span><span className="value">{b.email}</span></div>
                   <div className="detail"><span className="label">Phone</span><span className="value">{b.phone}</span></div>
                   {b.company && <div className="detail"><span className="label">Company</span><span className="value">{b.company}</span></div>}
                 </div>
-                {b.discussionTopic && (
-                  <div style={{ marginTop: '12px', fontSize: '13px', color: 'var(--text-secondary)' }}>
-                    <strong style={{ color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>Discussion:</strong>
-                    <br />{b.discussionTopic}
-                  </div>
-                )}
-                {b.qualification && (
-                  <div className="qualification-section">
-                    <h4>Lead Qualification</h4>
-                    <div className="qualification-grid">
-                      <div className="qualification-item">
-                        <div className="q-label">Problem</div>
-                        <div className="q-value">{b.qualification.problem || '—'}</div>
-                      </div>
-                      <div className="qualification-item">
-                        <div className="q-label">Budget</div>
-                        <div className="q-value">{b.qualification.budgetRange || '—'}</div>
-                      </div>
-                      <div className="qualification-item">
-                        <div className="q-label">Timeline</div>
-                        <div className="q-value">{b.qualification.timeline || '—'}</div>
-                      </div>
-                      <div className="qualification-item">
-                        <div className="q-label">Prior Agency</div>
-                        <div className="q-value">{b.qualification.workedWithAgencyBefore || '—'}</div>
-                      </div>
+                <div className="qualification-section">
+                  <h4 style={{ color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '12px' }}>
+                    Lead Qualification
+                  </h4>
+                  <div className="qualification-grid">
+                    <div className="qualification-item">
+                      <div className="q-label">Problem</div>
+                      <div className="q-value">{b.qualification?.problem || 'Not provided'}</div>
+                    </div>
+                    <div className="qualification-item">
+                      <div className="q-label">Discussion</div>
+                      <div className="q-value">{b.discussionTopic || 'Not provided'}</div>
+                    </div>
+                    <div className="qualification-item">
+                      <div className="q-label">Budget</div>
+                      <div className="q-value">{b.qualification?.budgetRange || 'Not provided'}</div>
+                    </div>
+                    <div className="qualification-item">
+                      <div className="q-label">Timeline</div>
+                      <div className="q-value">{b.qualification?.timeline || 'Not provided'}</div>
+                    </div>
+                    <div className="qualification-item">
+                      <div className="q-label">Prior Agency</div>
+                      <div className="q-value">{b.qualification?.workedWithAgencyBefore || 'Not provided'}</div>
                     </div>
                   </div>
-                )}
-                {b.meetingLink && (
-                  <div style={{ marginTop: '12px' }}>
+                </div>
+                <div style={{ marginTop: '12px' }}>
+                  {b.meetingLink ? (
                     <a href={b.meetingLink} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-sm">
                       Join Meeting →
                     </a>
-                  </div>
-                )}
+                  ) : (
+                    <span style={{ fontSize: '13px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                      Meeting link will be generated shortly.
+                    </span>
+                  )}
+                </div>
                 <div className="action-buttons">
                   <button className="btn btn-secondary btn-sm" onClick={() => markStatus(b.id, 'COMPLETED')}>✓ Mark Complete</button>
                   <button className="btn btn-secondary btn-sm" onClick={() => markStatus(b.id, 'NO_SHOW')} style={{ color: 'var(--warning)' }}>⚠ No Show</button>
@@ -278,12 +412,13 @@ export default function AdminDashboard() {
                   <h3>{b.clientName}</h3>
                   <span className={`status-badge ${b.status.toLowerCase().replace('_', '-')}`}>{b.status.replace('_', ' ')}</span>
                 </div>
-                <div className="booking-card-details">
-                  <div className="detail"><span className="label">Date</span><span className="value">{formatDate(b.date, { weekday: 'short', month: 'short', day: 'numeric' })}</span></div>
-                  <div className="detail"><span className="label">Time</span><span className="value">{formatTime12h(b.startTime)}</span></div>
-                  <div className="detail"><span className="label">Type</span><span className="value">{callLabel(b.callType)}</span></div>
-                  <div className="detail"><span className="label">Email</span><span className="value">{b.email}</span></div>
-                </div>
+                 <div className="booking-card-details">
+                   <div className="detail"><span className="label">Date</span><span className="value">{formatDate(b.date, adminTz)}</span></div>
+                   <div className="detail"><span className="label">Time</span><span className="value">{formatTime12h(b.startTime, b.date, adminTz)}</span></div>
+                   <div className="detail"><span className="label">Client Timezone</span><span className="value">{b.timeZone || 'Unknown timezone'}</span></div>
+                   <div className="detail"><span className="label">Type</span><span className="value">{callLabel(b.callType)}</span></div>
+                   <div className="detail"><span className="label">Email</span><span className="value">{b.email}</span></div>
+                 </div>
                 {b.qualification && (
                   <div className="qualification-section">
                     <h4>Lead Qualification</h4>
@@ -307,7 +442,58 @@ export default function AdminDashboard() {
 
       {/* Analytics */}
       {tab === 'analytics' && analytics && (
-        <div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          
+          {/* Daily Line Chart */}
+          <div className="card stats-graph-container">
+            <h3>Bookings Over Time</h3>
+            <div className="chart-wrapper">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={dailyData}>
+                  <defs>
+                    <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="var(--accent-primary)" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="var(--accent-primary)" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                  <XAxis 
+                    dataKey="displayDate" 
+                    axisLine={false} 
+                    tickLine={false} 
+                    tick={{ fill: 'var(--text-muted)', fontSize: 11 }}
+                    interval={4}
+                  />
+                  <YAxis 
+                    axisLine={false} 
+                    tickLine={false} 
+                    tick={{ fill: 'var(--text-muted)', fontSize: 11 }}
+                  />
+                  <Tooltip 
+                    contentStyle={{ 
+                      background: 'var(--bg-card)', 
+                      border: '1px solid var(--border)', 
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                      color: 'var(--text-primary)'
+                    }}
+                    itemStyle={{ color: 'var(--accent-primary)' }}
+                  />
+                  <Area 
+                    type="monotone" 
+                    dataKey="count" 
+                    stroke="var(--accent-primary)" 
+                    strokeWidth={3}
+                    fillOpacity={1} 
+                    fill="url(#colorCount)" 
+                    dot={{ fill: 'var(--accent-primary)', strokeWidth: 2, r: 4, stroke: 'var(--bg-primary)' }}
+                    activeDot={{ r: 6, strokeWidth: 0 }}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
           <div className="analytics-grid">
             <div className="analytics-card">
               <h3>Popular Time Slots</h3>

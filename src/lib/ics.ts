@@ -15,8 +15,8 @@ export function generateICS(booking: {
       ? '30 Min Consultation'
       : '60 Min Strategy Session';
 
-  const dtStart = `${booking.date.replace(/-/g, '')}T${booking.startTime.replace(':', '')}00`;
-  const dtEnd = `${booking.date.replace(/-/g, '')}T${booking.endTime.replace(':', '')}00`;
+  const dtStart = `${booking.date.replace(/-/g, '')}T${booking.startTime.replace(':', '')}00Z`;
+  const dtEnd = `${booking.date.replace(/-/g, '')}T${booking.endTime.replace(':', '')}00Z`;
   const now = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
 
   return [

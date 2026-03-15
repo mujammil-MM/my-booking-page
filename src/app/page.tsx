@@ -1,13 +1,19 @@
 'use client';
-
 import { useState, useEffect, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import CallTypeSelector from '@/components/CallTypeSelector';
 import CalendarPicker from '@/components/CalendarPicker';
 import TimeSlotGrid from '@/components/TimeSlotGrid';
-import ClientInfoForm from '@/components/ClientInfoForm';
-import QualificationForm from '@/components/QualificationForm';
 import { CallType, TimeSlot } from '@/lib/types';
 import { supabase } from '@/lib/supabaseClient';
+import TimezoneSelector from '@/components/TimezoneSelector';
+
+const ClientInfoForm = dynamic(() => import('@/components/ClientInfoForm'), { 
+  loading: () => <div className="skeleton" style={{ height: '300px' }} /> 
+});
+const QualificationForm = dynamic(() => import('@/components/QualificationForm'), {
+  loading: () => <div className="skeleton" style={{ height: '200px' }} />
+});
 
 export default function BookingPage() {
   const [step, setStep] = useState(1);
@@ -17,7 +23,7 @@ export default function BookingPage() {
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [timeZone, setTimeZone] = useState('UTC');
+  const [timeZone, setTimeZone] = useState('Asia/Kolkata');
 
   const [clientInfo, setClientInfo] = useState({
     clientName: '',
@@ -39,7 +45,8 @@ export default function BookingPage() {
   const [isHolidayToday, setIsHolidayToday] = useState(false);
 
   useEffect(() => {
-    setTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone);
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (tz) setTimeZone(tz);
     
     // Fetch holidays and settings
     Promise.all([
@@ -50,15 +57,15 @@ export default function BookingPage() {
       setHolidayMode(settingsData.holidayMode || false);
       
       const todayStr = new Date().toISOString().split('T')[0];
-      const foundToday = (holidaysData || []).some((h: any) => h.date === todayStr);
+      const foundToday = (holidaysData || []).some((h: { date: string }) => h.date === todayStr);
       setIsHolidayToday(foundToday);
     });
   }, []);
 
-  const fetchSlots = useCallback(async (date: string, type: CallType) => {
+  const fetchSlots = useCallback(async (date: string, type: CallType, tz: string) => {
     setLoadingSlots(true);
     try {
-      const res = await fetch(`/api/availability?date=${date}&callType=${type}`);
+      const res = await fetch(`/api/availability?date=${date}&callType=${type}&timezone=${tz}`);
       const data = await res.json();
       setTimeSlots(data.slots || []);
     } catch {
@@ -69,10 +76,10 @@ export default function BookingPage() {
 
   useEffect(() => {
     if (selectedDate && callType) {
-      fetchSlots(selectedDate, callType);
+      fetchSlots(selectedDate, callType, timeZone);
       setSelectedTime(null);
     }
-  }, [selectedDate, callType, fetchSlots]);
+  }, [selectedDate, callType, timeZone, fetchSlots]);
 
   function handleCallTypeSelect(type: CallType) {
     setCallType(type);
@@ -131,9 +138,15 @@ export default function BookingPage() {
           phone: clientInfo.phone,
           company: clientInfo.company,
           call_type: callType,
-          date: selectedDate,
-          time: selectedTime,
+          date: booking.date, // Save normalization UTC date
+          time: booking.startTime, // Save normalization UTC time
+          client_timezone: timeZone,
           meeting_link: booking.meetingLink,
+          discussion: clientInfo.discussionTopic,
+          problem: qualification.problem,
+          budget: qualification.budgetRange,
+          timeline: qualification.timeline,
+          prior_agency: qualification.workedWithAgencyBefore,
           created_at: new Date().toISOString()
         });
       } catch (supabaseError) {
@@ -151,9 +164,15 @@ export default function BookingPage() {
             phone: clientInfo.phone,
             company: clientInfo.company,
             call_type: callType,
-            date: selectedDate,
-            time: selectedTime,
+            date: booking.date,
+            time: booking.startTime,
+            timezone: timeZone,
             meeting_link: booking.meetingLink,
+            discussion: clientInfo.discussionTopic,
+            problem: qualification.problem,
+            budget: qualification.budgetRange,
+            timeline: qualification.timeline,
+            prior_agency: qualification.workedWithAgencyBefore,
           }),
         });
       } catch (notifyError) {
@@ -231,9 +250,17 @@ export default function BookingPage() {
         <CallTypeSelector selected={callType} onSelect={handleCallTypeSelect} />
       </div>
 
+      {/* Timezone Switcher */}
+      <div className="section" style={isAppDisabled ? { opacity: 0.5, pointerEvents: 'none' } : {}}>
+        <TimezoneSelector 
+          value={timeZone} 
+          onChange={setTimeZone}
+        />
+      </div>
+
       {/* Step 2: Calendar & Time */}
       {callType && (
-        <div className="section" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', ...(isAppDisabled ? { opacity: 0.5, pointerEvents: 'none' } : {}) }}>
+        <div className="section calendar-time-grid" style={isAppDisabled ? { opacity: 0.5, pointerEvents: 'none' } : {}}>
           <div>
             <div className="section-title">
               <span className="step-number">2</span>
@@ -289,10 +316,9 @@ export default function BookingPage() {
 
       {/* Submit */}
       {selectedTime && (
-        <div className="section" style={{ textAlign: 'center', paddingBottom: '60px' }}>
+        <div className="section confirm-btn-container" style={{ textAlign: 'center', paddingBottom: '60px' }}>
           <button
-            className="btn btn-primary btn-lg btn-full"
-            style={{ maxWidth: '400px' }}
+            className="btn btn-primary btn-lg btn-full confirm-btn"
             disabled={!canSubmit || submitting}
             onClick={handleSubmit}
           >
@@ -305,7 +331,7 @@ export default function BookingPage() {
               <>Confirm Booking</>
             )}
           </button>
-          <p style={{ fontSize: '12px', color: 'var(--text-dim)', marginTop: '12px' }}>
+          <p className="mobile-hide" style={{ fontSize: '12px', color: 'var(--text-dim)', marginTop: '12px' }}>
             You can reschedule or cancel anytime before the meeting
           </p>
         </div>

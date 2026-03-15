@@ -81,11 +81,15 @@ export default function CancelPage() {
         <div className="confirmation-details">
           <div className="detail-row">
             <span className="label">Date</span>
-            <span className="value">{formatDate(booking.date)}</span>
+            <span className="value">{formatDate(booking.date, booking.timeZone)}</span>
           </div>
           <div className="detail-row">
             <span className="label">Time</span>
-            <span className="value">{formatTime12h(booking.startTime)} – {formatTime12h(booking.endTime)}</span>
+            <span className="value">{formatTime12h(booking.startTime, booking.date, booking.timeZone)} – {formatTime12h(booking.endTime, booking.date, booking.timeZone)}</span>
+          </div>
+          <div className="detail-row">
+            <span className="label">Timezone</span>
+            <span className="value">{booking.timeZone}</span>
           </div>
           <div className="detail-row">
             <span className="label">Name</span>

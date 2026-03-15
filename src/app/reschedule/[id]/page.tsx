@@ -6,16 +6,16 @@ import CalendarPicker from '@/components/CalendarPicker';
 import TimeSlotGrid from '@/components/TimeSlotGrid';
 import { BookingResponse, TimeSlot, CallType } from '@/lib/types';
 
-function formatTime12h(time24: string): string {
-  const [h, m] = time24.split(':').map(Number);
-  const period = h >= 12 ? 'PM' : 'AM';
-  const h12 = h % 12 || 12;
-  return `${h12}:${String(m).padStart(2, '0')} ${period}`;
+import { toDate, formatInTimeZone } from 'date-fns-tz';
+
+function formatTime12h(time24: string, dateStr: string, timeZone: string): string {
+  const d = toDate(`${dateStr}T${time24}:00`, { timeZone: 'UTC' });
+  return formatInTimeZone(d, timeZone, 'hh:mm a');
 }
 
-function formatDate(dateStr: string): string {
-  const d = new Date(dateStr + 'T00:00:00');
-  return d.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+function formatDate(dateStr: string, timeZone: string): string {
+  const d = toDate(`${dateStr}T00:00:00`, { timeZone: 'UTC' });
+  return formatInTimeZone(d, timeZone, 'EEEE, MMMM d, yyyy');
 }
 
 export default function ReschedulePage() {
@@ -29,20 +29,22 @@ export default function ReschedulePage() {
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
-  const [timeZone, setTimeZone] = useState('UTC');
+  const [timeZone, setTimeZone] = useState('Asia/Kolkata');
 
   useEffect(() => {
-    setTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone);
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (tz) setTimeZone(tz);
+
     fetch(`/api/bookings/${id}`)
       .then(r => r.json())
       .then(data => { setBooking(data); setLoading(false); })
       .catch(() => setLoading(false));
   }, [id]);
 
-  const fetchSlots = useCallback(async (date: string, callType: CallType) => {
+  const fetchSlots = useCallback(async (date: string, callType: CallType, tz: string) => {
     setLoadingSlots(true);
     try {
-      const res = await fetch(`/api/availability?date=${date}&callType=${callType}`);
+      const res = await fetch(`/api/availability?date=${date}&callType=${callType}&timezone=${tz}`);
       const data = await res.json();
       setTimeSlots(data.slots || []);
     } catch {
@@ -53,10 +55,10 @@ export default function ReschedulePage() {
 
   useEffect(() => {
     if (selectedDate && booking) {
-      fetchSlots(selectedDate, booking.callType as CallType);
+      fetchSlots(selectedDate, booking.callType as CallType, timeZone);
       setSelectedTime(null);
     }
-  }, [selectedDate, booking, fetchSlots]);
+  }, [selectedDate, booking, timeZone, fetchSlots]);
 
   async function handleReschedule() {
     if (!selectedDate || !selectedTime) return;
@@ -67,7 +69,11 @@ export default function ReschedulePage() {
       const res = await fetch(`/api/bookings/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date: selectedDate, startTime: selectedTime }),
+        body: JSON.stringify({ 
+          date: selectedDate, 
+          startTime: selectedTime,
+          timeZone: timeZone // Ensure server knows original client context
+        }),
       });
 
       if (!res.ok) {
@@ -123,7 +129,7 @@ export default function ReschedulePage() {
         <div className="badge">🔄 Reschedule</div>
         <h1>Reschedule Your Call</h1>
         <p>
-          Current booking: <strong>{formatDate(booking.date)}</strong> at <strong>{formatTime12h(booking.startTime)}</strong>
+          Current booking: <strong>{formatDate(booking.date, booking.timeZone)}</strong> at <strong>{formatTime12h(booking.startTime, booking.date, booking.timeZone)}</strong>
           <br />Reschedules remaining: <strong>{2 - booking.rescheduleCount}</strong>
         </p>
       </header>
