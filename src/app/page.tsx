@@ -131,6 +131,8 @@ export default function BookingPage() {
 
       const booking = await res.json();
 
+      // 3. (Optional) Manual Supabase Insert
+      // Note: Admin notifications are already sent by /api/bookings
       try {
         await supabase.from('bookings').insert({
           name: clientInfo.clientName,
@@ -138,8 +140,8 @@ export default function BookingPage() {
           phone: clientInfo.phone,
           company: clientInfo.company,
           call_type: callType,
-          date: booking.date, // Save normalization UTC date
-          time: booking.startTime, // Save normalization UTC time
+          date: booking.date, 
+          time: booking.startTime, 
           client_timezone: timeZone,
           meeting_link: booking.meetingLink,
           discussion: clientInfo.discussionTopic,
@@ -151,32 +153,6 @@ export default function BookingPage() {
         });
       } catch (supabaseError) {
         console.error('Failed to save booking to Supabase:', supabaseError);
-      }
-
-      // 3. Trigger Resend Email Notification via our new secure route
-      try {
-        await fetch('/api/notify-supabase-booking', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: clientInfo.clientName,
-            email: clientInfo.email,
-            phone: clientInfo.phone,
-            company: clientInfo.company,
-            call_type: callType,
-            date: booking.date,
-            time: booking.startTime,
-            timezone: timeZone,
-            meeting_link: booking.meetingLink,
-            discussion: clientInfo.discussionTopic,
-            problem: qualification.problem,
-            budget: qualification.budgetRange,
-            timeline: qualification.timeline,
-            prior_agency: qualification.workedWithAgencyBefore,
-          }),
-        });
-      } catch (notifyError) {
-        console.error('Failed to trigger Supabase email notification:', notifyError);
       }
 
       window.location.href = `/confirmation/${booking.id}`;

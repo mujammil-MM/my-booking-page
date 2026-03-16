@@ -6,8 +6,6 @@ import { BookingResponse, AnalyticsData } from '@/lib/types';
 
 import { formatTime12h, formatDate } from '@/lib/utils';
 import { 
-  LineChart, 
-  Line, 
   XAxis, 
   YAxis, 
   CartesianGrid, 
@@ -98,23 +96,24 @@ export default function AdminDashboard() {
   };
 
   useEffect(() => {
-    // Initial load: Fetch essential data first
-    Promise.all([
-      fetchBookings(0, debouncedSearch),
-      fetchSettings(),
-    ]).then(() => {
-      setLoading(false);
-      // Secondary load: Analytics and holidays can load in background
-      fetchAnalytics();
-      fetchHolidays();
-    }).catch(() => setLoading(false));
+    // Initial load: Fetch settings first
+    fetchSettings()
+      .then(() => {
+        setLoading(false);
+        // Secondary load: Analytics and holidays can load in background
+        fetchAnalytics();
+        fetchHolidays();
+      })
+      .catch(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     if (!loading) {
       fetchBookings(page * limit, debouncedSearch);
     }
-  }, [page, debouncedSearch]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, debouncedSearch, loading]);
 
   async function toggleHolidayMode() {
     const nextMode = !holidayMode;
@@ -579,7 +578,7 @@ export default function AdminDashboard() {
             holidays.map(h => (
               <div key={h.id} className="booking-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
-                  <h3 style={{ margin: 0 }}>{formatDate(h.date, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</h3>
+                  <h3 style={{ margin: 0 }}>{formatDate(h.date, adminTz)}</h3>
                   <p style={{ margin: '4px 0 0', color: 'var(--text-muted)', fontSize: '13px' }}>{h.note || 'No note provided'}</p>
                 </div>
                 <button 

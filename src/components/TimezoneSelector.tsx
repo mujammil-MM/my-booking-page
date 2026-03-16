@@ -1,6 +1,6 @@
 'use client';
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { getAllTimezones, getGMTLabel, TimezoneOption } from '@/lib/timezones';
+import { getAllTimezones, getGMTLabel } from '@/lib/timezones';
 
 interface Props {
   value: string;

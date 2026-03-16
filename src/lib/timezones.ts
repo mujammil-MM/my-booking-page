@@ -29,9 +29,13 @@ export interface TimezoneOption {
 export function getAllTimezones(): TimezoneOption[] {
   let allTzs: string[] = [];
   try {
-    // @ts-ignore - Intl.supportedValuesOf is a newer feature
-    if (typeof (Intl as any).supportedValuesOf === 'function') {
-      allTzs = (Intl as any).supportedValuesOf('timeZone');
+    if (typeof Intl === 'object' && 'supportedValuesOf' in Intl) {
+      const i = Intl as unknown as { supportedValuesOf: (key: string) => string[] };
+      if (typeof i.supportedValuesOf === 'function') {
+        allTzs = i.supportedValuesOf('timeZone');
+      } else {
+        throw new Error('Not supported');
+      }
     } else {
       throw new Error('Not supported');
     }

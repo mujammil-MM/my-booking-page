@@ -24,8 +24,8 @@ export async function POST(req: NextRequest) {
       data: { date, note: note || '' },
     });
     return NextResponse.json(holiday, { status: 201 });
-  } catch (error: any) {
-    if (error.code === 'P2002') {
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'P2002') {
       return NextResponse.json({ error: 'Holiday already exists for this date' }, { status: 409 });
     }
     console.error('Failed to create holiday:', error);

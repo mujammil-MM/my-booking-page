@@ -3,8 +3,8 @@ import prisma from '@/lib/prisma';
 import { deleteCalendarEvent, updateCalendarEvent } from '@/lib/calendar';
 import { sendCancellationEmail } from '@/lib/email';
 import { CallType, getCallDuration } from '@/lib/types';
-import { toDate } from 'date-fns-tz';
-import { addMinutes, format } from 'date-fns';
+import { toDate, formatInTimeZone } from 'date-fns-tz';
+import { addMinutes } from 'date-fns';
 
 export async function GET(
   req: NextRequest,
@@ -45,14 +45,14 @@ export async function PATCH(
     const clientTz = body.timeZone || booking.timeZone || 'UTC';
     const duration = getCallDuration(booking.callType as CallType);
 
-    // Normalize incoming local time to UTC
+    // Normalize incoming local time to UTC and store as UTC strings
     const startDateTimeUTC = toDate(`${body.date}T${body.startTime}:00`, { timeZone: clientTz });
-    const utcDate = format(startDateTimeUTC, 'yyyy-MM-dd');
-    const utcStart = format(startDateTimeUTC, 'HH:mm');
+    const utcDate = formatInTimeZone(startDateTimeUTC, 'UTC', 'yyyy-MM-dd');
+    const utcStart = formatInTimeZone(startDateTimeUTC, 'UTC', 'HH:mm');
     
     const endDateTimeUTC = addMinutes(startDateTimeUTC, duration);
-    const utcEnd = format(endDateTimeUTC, 'HH:mm');
-    const utcEndDate = format(endDateTimeUTC, 'yyyy-MM-dd');
+    const utcEnd = formatInTimeZone(endDateTimeUTC, 'UTC', 'HH:mm');
+    const utcEndDate = formatInTimeZone(endDateTimeUTC, 'UTC', 'yyyy-MM-dd');
 
     // Check 2-hour cutoff (using normalized UTC)
     const currentMeetingUTC = toDate(`${booking.date}T${booking.startTime}:00`, { timeZone: 'UTC' });

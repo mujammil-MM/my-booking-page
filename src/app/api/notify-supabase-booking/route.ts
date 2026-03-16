@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Resend } from 'resend';
 import { toDate, formatInTimeZone } from 'date-fns-tz';
 
-// Initialize the explicitly requested API key for this route
-const resend = new Resend('re_PsH1uH9b_N5PXrR9kUPtWj6Pzz9dYrbaX');
+// Initialize Resend with the API key from environment variables
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function POST(req: NextRequest) {
   try {

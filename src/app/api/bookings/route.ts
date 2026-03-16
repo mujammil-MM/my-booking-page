@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
+import { Prisma } from '@prisma/client';
 import { createCalendarEvent } from '@/lib/calendar';
 import { sendConfirmationEmail, sendAdminNotificationEmail } from '@/lib/email';
 import { sendAdminSMS } from '@/lib/sms';
 import { CallType, getCallDuration } from '@/lib/types';
-import { toDate } from 'date-fns-tz';
-import { addMinutes, format } from 'date-fns';
+import { toDate, formatInTimeZone } from 'date-fns-tz';
+import { addMinutes } from 'date-fns';
 
 export async function GET(req: NextRequest) {
   try {
@@ -17,7 +18,7 @@ export async function GET(req: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '50');
     const offset = parseInt(searchParams.get('offset') || '0');
 
-    const where: Record<string, any> = {};
+    const where: Prisma.BookingWhereInput = {};
     if (status) where.status = status;
     if (dateFrom && dateTo) {
       where.date = { gte: dateFrom, lte: dateTo };
@@ -99,14 +100,14 @@ export async function POST(req: NextRequest) {
 
     const duration = getCallDuration(callType as CallType);
 
-    // Convert local time to UTC
+    // Convert local time to UTC and store as UTC strings
     const startDateTimeLocal = toDate(`${localDate}T${localStart}:00`, { timeZone: clientTz });
-    const date = format(startDateTimeLocal, 'yyyy-MM-dd');
-    const startTime = format(startDateTimeLocal, 'HH:mm');
+    const date = formatInTimeZone(startDateTimeLocal, 'UTC', 'yyyy-MM-dd');
+    const startTime = formatInTimeZone(startDateTimeLocal, 'UTC', 'HH:mm');
     
     const endDateTimeUTC = addMinutes(startDateTimeLocal, duration);
-    const endTime = format(endDateTimeUTC, 'HH:mm');
-    const endDate = format(endDateTimeUTC, 'yyyy-MM-dd');
+    const endTime = formatInTimeZone(endDateTimeUTC, 'UTC', 'HH:mm');
+    const endDate = formatInTimeZone(endDateTimeUTC, 'UTC', 'yyyy-MM-dd');
 
     // Check for double booking using the normalized UTC date/time range
     // Note: A booking might span across two UTC dates, but for now we simplify 
