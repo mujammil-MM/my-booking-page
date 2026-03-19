@@ -6,7 +6,11 @@ export async function GET() {
     const holidays = await prisma.holiday.findMany({
       orderBy: { date: 'asc' },
     });
-    return NextResponse.json(holidays);
+    return NextResponse.json(holidays, {
+      headers: {
+        'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300',
+      },
+    });
   } catch (error) {
     console.error('Failed to fetch holidays:', error);
     return NextResponse.json({ error: 'Failed to fetch holidays' }, { status: 500 });

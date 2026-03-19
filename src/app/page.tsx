@@ -5,14 +5,13 @@ import CallTypeSelector from '@/components/CallTypeSelector';
 import CalendarPicker from '@/components/CalendarPicker';
 import TimeSlotGrid from '@/components/TimeSlotGrid';
 import { CallType, TimeSlot } from '@/lib/types';
-import { supabase } from '@/lib/supabaseClient';
 import TimezoneSelector from '@/components/TimezoneSelector';
 
-const ClientInfoForm = dynamic(() => import('@/components/ClientInfoForm'), { 
-  loading: () => <div className="skeleton" style={{ height: '300px' }} /> 
+const ClientInfoForm = dynamic(() => import('@/components/ClientInfoForm'), {
+  loading: () => <div className="skeleton" style={{ height: '300px' }} />,
 });
 const QualificationForm = dynamic(() => import('@/components/QualificationForm'), {
-  loading: () => <div className="skeleton" style={{ height: '200px' }} />
+  loading: () => <div className="skeleton" style={{ height: '200px' }} />,
 });
 
 export default function BookingPage() {
@@ -23,6 +22,7 @@ export default function BookingPage() {
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [timeZone, setTimeZone] = useState('Asia/Kolkata');
 
   const [clientInfo, setClientInfo] = useState({
@@ -47,18 +47,20 @@ export default function BookingPage() {
   useEffect(() => {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
     if (tz) setTimeZone(tz);
-    
-    // Fetch holidays and settings
+
+    // Fetch holidays and settings in parallel (with caching)
     Promise.all([
-      fetch('/api/holidays').then(r => r.json()),
-      fetch('/api/settings').then(r => r.json()),
+      fetch('/api/holidays', { next: { revalidate: 300 } } as RequestInit).then(r => r.json()),
+      fetch('/api/settings', { next: { revalidate: 300 } } as RequestInit).then(r => r.json()),
     ]).then(([holidaysData, settingsData]) => {
       setHolidays(holidaysData || []);
       setHolidayMode(settingsData.holidayMode || false);
-      
+
       const todayStr = new Date().toISOString().split('T')[0];
       const foundToday = (holidaysData || []).some((h: { date: string }) => h.date === todayStr);
       setIsHolidayToday(foundToday);
+    }).catch(() => {
+      // Non-fatal: silently continue if settings fail to load
     });
   }, []);
 
@@ -94,20 +96,23 @@ export default function BookingPage() {
   function handleTimeSelect(time: string) {
     setSelectedTime(time);
     if (step < 3) setStep(3);
+    setErrorMsg(null);
   }
 
   async function handleSubmit() {
     if (!callType || !selectedDate || !selectedTime) return;
     if (!clientInfo.clientName || !clientInfo.email || !clientInfo.phone || !clientInfo.discussionTopic) {
-      alert('Please fill in all required fields.');
+      setErrorMsg('Please fill in all required fields.');
       return;
     }
     if (!qualification.problem) {
-      alert('Please describe the problem you are trying to solve.');
+      setErrorMsg('Please describe the problem you are trying to solve.');
       return;
     }
 
     setSubmitting(true);
+    setErrorMsg(null);
+
     try {
       const res = await fetch('/api/bookings', {
         method: 'POST',
@@ -119,45 +124,21 @@ export default function BookingPage() {
           startTime: selectedTime,
           timeZone,
           qualification,
+          website: '', // honeypot field (always empty for real users)
         }),
       });
 
       if (!res.ok) {
         const err = await res.json();
-        alert(err.error || 'Booking failed. Please try again.');
+        setErrorMsg(err.error || 'Booking failed. Please try again.');
         setSubmitting(false);
         return;
       }
 
       const booking = await res.json();
-
-      // 3. (Optional) Manual Supabase Insert
-      // Note: Admin notifications are already sent by /api/bookings
-      try {
-        await supabase.from('bookings').insert({
-          name: clientInfo.clientName,
-          email: clientInfo.email,
-          phone: clientInfo.phone,
-          company: clientInfo.company,
-          call_type: callType,
-          date: booking.date, 
-          time: booking.startTime, 
-          client_timezone: timeZone,
-          meeting_link: booking.meetingLink,
-          discussion: clientInfo.discussionTopic,
-          problem: qualification.problem,
-          budget: qualification.budgetRange,
-          timeline: qualification.timeline,
-          prior_agency: qualification.workedWithAgencyBefore,
-          created_at: new Date().toISOString()
-        });
-      } catch (supabaseError) {
-        console.error('Failed to save booking to Supabase:', supabaseError);
-      }
-
       window.location.href = `/confirmation/${booking.id}`;
     } catch {
-      alert('Something went wrong. Please try again.');
+      setErrorMsg('Something went wrong. Please check your connection and try again.');
       setSubmitting(false);
     }
   }
@@ -203,7 +184,7 @@ export default function BookingPage() {
         <div className={`progress-line ${step > 1 ? 'completed' : ''}`} />
         <div className={`progress-step ${step >= 2 ? 'active' : ''} ${step > 2 ? 'completed' : ''}`}>
           <span className="dot" />
-          Date & Time
+          Date &amp; Time
         </div>
         <div className={`progress-line ${step > 2 ? 'completed' : ''}`} />
         <div className={`progress-step ${step >= 3 ? 'active' : ''} ${step > 3 ? 'completed' : ''}`}>
@@ -228,8 +209,8 @@ export default function BookingPage() {
 
       {/* Timezone Switcher */}
       <div className="section" style={isAppDisabled ? { opacity: 0.5, pointerEvents: 'none' } : {}}>
-        <TimezoneSelector 
-          value={timeZone} 
+        <TimezoneSelector
+          value={timeZone}
           onChange={setTimeZone}
         />
       </div>
@@ -242,9 +223,9 @@ export default function BookingPage() {
               <span className="step-number">2</span>
               Choose Date
             </div>
-            <CalendarPicker 
-              selectedDate={selectedDate} 
-              onSelectDate={handleDateSelect} 
+            <CalendarPicker
+              selectedDate={selectedDate}
+              onSelectDate={handleDateSelect}
               blockedDates={holidays.map(h => h.date)}
             />
           </div>
@@ -266,7 +247,7 @@ export default function BookingPage() {
 
       {/* Step 3: Client Info */}
       {selectedTime && (
-        <div className="section">
+        <div className="section section-animate">
           <div className="section-title">
             <span className="step-number">3</span>
             Your Information
@@ -279,7 +260,7 @@ export default function BookingPage() {
 
       {/* Step 4: Qualification */}
       {selectedTime && clientInfo.clientName && clientInfo.email && (
-        <div className="section">
+        <div className="section section-animate">
           <div className="section-title">
             <span className="step-number">4</span>
             Quick Questions
@@ -293,6 +274,12 @@ export default function BookingPage() {
       {/* Submit */}
       {selectedTime && (
         <div className="section confirm-btn-container" style={{ textAlign: 'center', paddingBottom: '60px' }}>
+          {errorMsg && (
+            <div className="error-banner" role="alert">
+              <span className="error-banner-icon">⚠</span>
+              {errorMsg}
+            </div>
+          )}
           <button
             className="btn btn-primary btn-lg btn-full confirm-btn"
             disabled={!canSubmit || submitting}

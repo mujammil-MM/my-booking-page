@@ -39,6 +39,8 @@ export default function AdminDashboard() {
   const [holidayMode, setHolidayMode] = useState(false);
   const [loading, setLoading] = useState(true);
   const [bookingsLoading, setBookingsLoading] = useState(false);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [analyticsLoaded, setAnalyticsLoaded] = useState(false);
   const [showHolidayModal, setShowHolidayModal] = useState(false);
   const [newHoliday, setNewHoliday] = useState({ date: '', note: '' });
   const [page, setPage] = useState(0);
@@ -85,26 +87,29 @@ export default function AdminDashboard() {
   };
 
   const fetchAnalytics = async () => {
-    const res = await fetch('/api/analytics');
-    const data = await res.json();
-    setAnalytics(data);
+    setAnalyticsLoading(true);
+    try {
+      const res = await fetch('/api/analytics');
+      const data = await res.json();
+      setAnalytics(data);
 
-    // Also fetch daily data
-    const resDaily = await fetch('/api/analytics/daily');
-    const dataDaily = await resDaily.json();
-    setDailyData(dataDaily);
+      // Also fetch daily data
+      const resDaily = await fetch('/api/analytics/daily');
+      const dataDaily = await resDaily.json();
+      setDailyData(dataDaily);
+      setAnalyticsLoaded(true);
+    } catch (err) {
+      console.error('Failed to fetch analytics:', err);
+    } finally {
+      setAnalyticsLoading(false);
+    }
   };
 
   useEffect(() => {
-    // Initial load: Fetch settings first
-    fetchSettings()
-      .then(() => {
-        setLoading(false);
-        // Secondary load: Analytics and holidays can load in background
-        fetchAnalytics();
-        fetchHolidays();
-      })
-      .catch(() => setLoading(false));
+    // Initial load: Fetch settings + holidays in parallel (analytics is lazy)
+    Promise.all([fetchSettings(), fetchHolidays()])
+      .catch(() => {})
+      .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -315,7 +320,13 @@ export default function AdminDashboard() {
         <button className={`admin-tab ${tab === 'holidays' ? 'active' : ''}`} onClick={() => setTab('holidays')}>
           Holidays ({holidays.length})
         </button>
-        <button className={`admin-tab ${tab === 'analytics' ? 'active' : ''}`} onClick={() => setTab('analytics')}>
+        <button
+          className={`admin-tab ${tab === 'analytics' ? 'active' : ''}`}
+          onClick={() => {
+            setTab('analytics');
+            if (!analyticsLoaded && !analyticsLoading) fetchAnalytics();
+          }}
+        >
           Analytics
         </button>
       </div>
@@ -440,126 +451,140 @@ export default function AdminDashboard() {
       )}
 
       {/* Analytics */}
-      {tab === 'analytics' && analytics && (
+      {tab === 'analytics' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          
-          {/* Daily Line Chart */}
-          <div className="card stats-graph-container">
-            <h3>Bookings Over Time</h3>
-            <div className="chart-wrapper">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={dailyData}>
-                  <defs>
-                    <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="var(--accent-primary)" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="var(--accent-primary)" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-                  <XAxis 
-                    dataKey="displayDate" 
-                    axisLine={false} 
-                    tickLine={false} 
-                    tick={{ fill: 'var(--text-muted)', fontSize: 11 }}
-                    interval={4}
-                  />
-                  <YAxis 
-                    axisLine={false} 
-                    tickLine={false} 
-                    tick={{ fill: 'var(--text-muted)', fontSize: 11 }}
-                  />
-                  <Tooltip 
-                    contentStyle={{ 
-                      background: 'var(--bg-card)', 
-                      border: '1px solid var(--border)', 
-                      borderRadius: '8px',
-                      fontSize: '12px',
-                      color: 'var(--text-primary)'
-                    }}
-                    itemStyle={{ color: 'var(--accent-primary)' }}
-                  />
-                  <Area 
-                    type="monotone" 
-                    dataKey="count" 
-                    stroke="var(--accent-primary)" 
-                    strokeWidth={3}
-                    fillOpacity={1} 
-                    fill="url(#colorCount)" 
-                    dot={{ fill: 'var(--accent-primary)', strokeWidth: 2, r: 4, stroke: 'var(--bg-primary)' }}
-                    activeDot={{ r: 6, strokeWidth: 0 }}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+          {analyticsLoading && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {[1, 2, 3].map(i => <div key={i} className="skeleton" style={{ height: 120, borderRadius: 12 }} />)}
             </div>
-          </div>
-
-          <div className="analytics-grid">
-            <div className="analytics-card">
-              <h3>Popular Time Slots</h3>
-              {analytics.popularSlots.length === 0 ? (
-                <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>No data yet</p>
-              ) : (
-                <div className="bar-chart">
-                  {analytics.popularSlots.map(slot => {
-                    const max = Math.max(...analytics.popularSlots.map(s => s.count));
-                    return (
-                      <div key={slot.time} className="bar-row">
-                        <span className="bar-label">{formatTime12h(slot.time)}</span>
-                        <div className="bar-track">
-                          <div className="bar-fill" style={{ width: `${(slot.count / max) * 100}%` }} />
-                        </div>
-                        <span className="bar-value">{slot.count}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+          )}
+          {!analyticsLoading && !analytics && (
+            <div className="empty-state">
+              <div className="emoji">📊</div>
+              <p>No analytics data available yet</p>
             </div>
-
-            <div className="analytics-card">
-              <h3>Bookings by Type</h3>
-              {analytics.bookingsByType.length === 0 ? (
-                <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>No data yet</p>
-              ) : (
-                <div className="bar-chart">
-                  {analytics.bookingsByType.map(item => {
-                    const max = Math.max(...analytics.bookingsByType.map(s => s.count));
-                    return (
-                      <div key={item.type} className="bar-row">
-                        <span className="bar-label" style={{ width: '100px' }}>{callLabel(item.type)}</span>
-                        <div className="bar-track">
-                          <div className="bar-fill" style={{ width: `${(item.count / max) * 100}%` }} />
-                        </div>
-                        <span className="bar-value">{item.count}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            <div className="analytics-card">
-              <h3>Status Breakdown</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--success)' }}>{analytics.completedBookings}</div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' as const }}>Completed</div>
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--danger)' }}>{analytics.cancelledBookings}</div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' as const }}>Cancelled</div>
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--warning)' }}>{analytics.noShowBookings}</div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' as const }}>No Shows</div>
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--accent-primary)' }}>{analytics.upcomingBookings}</div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' as const }}>Upcoming</div>
+          )}
+          {!analyticsLoading && analytics && (
+            <>
+              {/* Daily Line Chart */}
+              <div className="card stats-graph-container">
+                <h3>Bookings Over Time</h3>
+                <div className="chart-wrapper">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={dailyData}>
+                      <defs>
+                        <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="var(--accent-primary)" stopOpacity={0.3}/>
+                          <stop offset="95%" stopColor="var(--accent-primary)" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                      <XAxis
+                        dataKey="displayDate"
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fill: 'var(--text-muted)', fontSize: 11 }}
+                        interval={4}
+                      />
+                      <YAxis
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fill: 'var(--text-muted)', fontSize: 11 }}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          background: 'var(--bg-card)',
+                          border: '1px solid var(--border)',
+                          borderRadius: '8px',
+                          fontSize: '12px',
+                          color: 'var(--text-primary)'
+                        }}
+                        itemStyle={{ color: 'var(--accent-primary)' }}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="count"
+                        stroke="var(--accent-primary)"
+                        strokeWidth={3}
+                        fillOpacity={1}
+                        fill="url(#colorCount)"
+                        dot={{ fill: 'var(--accent-primary)', strokeWidth: 2, r: 4, stroke: 'var(--bg-primary)' }}
+                        activeDot={{ r: 6, strokeWidth: 0 }}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
                 </div>
               </div>
-            </div>
-          </div>
+
+              <div className="analytics-grid">
+                <div className="analytics-card">
+                  <h3>Popular Time Slots</h3>
+                  {analytics.popularSlots.length === 0 ? (
+                    <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>No data yet</p>
+                  ) : (
+                    <div className="bar-chart">
+                      {analytics.popularSlots.map(slot => {
+                        const max = Math.max(...analytics.popularSlots.map(s => s.count));
+                        return (
+                          <div key={slot.time} className="bar-row">
+                            <span className="bar-label">{formatTime12h(slot.time)}</span>
+                            <div className="bar-track">
+                              <div className="bar-fill" style={{ width: `${(slot.count / max) * 100}%` }} />
+                            </div>
+                            <span className="bar-value">{slot.count}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="analytics-card">
+                  <h3>Bookings by Type</h3>
+                  {analytics.bookingsByType.length === 0 ? (
+                    <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>No data yet</p>
+                  ) : (
+                    <div className="bar-chart">
+                      {analytics.bookingsByType.map(item => {
+                        const max = Math.max(...analytics.bookingsByType.map(s => s.count));
+                        return (
+                          <div key={item.type} className="bar-row">
+                            <span className="bar-label" style={{ width: '100px' }}>{callLabel(item.type)}</span>
+                            <div className="bar-track">
+                              <div className="bar-fill" style={{ width: `${(item.count / max) * 100}%` }} />
+                            </div>
+                            <span className="bar-value">{item.count}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="analytics-card">
+                  <h3>Status Breakdown</h3>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--success)' }}>{analytics.completedBookings}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' as const }}>Completed</div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--danger)' }}>{analytics.cancelledBookings}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' as const }}>Cancelled</div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--warning)' }}>{analytics.noShowBookings}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' as const }}>No Shows</div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--accent-primary)' }}>{analytics.upcomingBookings}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' as const }}>Upcoming</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
 

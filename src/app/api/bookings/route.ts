@@ -8,6 +8,40 @@ import { CallType, getCallDuration } from '@/lib/types';
 import { toDate, formatInTimeZone } from 'date-fns-tz';
 import { addMinutes } from 'date-fns';
 
+// ─── Rate Limiting ───────────────────────────────────────────────────────────
+interface RateLimitEntry {
+  count: number;
+  resetAt: number;
+}
+const rateLimitMap = new Map<string, RateLimitEntry>();
+const RATE_LIMIT_MAX = 5;
+const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = rateLimitMap.get(ip);
+
+  if (!entry || now > entry.resetAt) {
+    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return true; // allowed
+  }
+
+  if (entry.count >= RATE_LIMIT_MAX) return false; // blocked
+
+  entry.count += 1;
+  return true;
+}
+
+// ─── Validation ──────────────────────────────────────────────────────────────
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+}
+
+function isValidPhone(phone: string): boolean {
+  return /^[\d\s\+\-\(\)]{7,20}$/.test(phone.trim());
+}
+
+// ─── GET – List bookings (admin) ─────────────────────────────────────────────
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -15,8 +49,8 @@ export async function GET(req: NextRequest) {
     const dateFrom = searchParams.get('dateFrom');
     const dateTo = searchParams.get('dateTo');
     const query = searchParams.get('q');
-    const limit = parseInt(searchParams.get('limit') || '50');
-    const offset = parseInt(searchParams.get('offset') || '0');
+    const limit = Math.min(parseInt(searchParams.get('limit') || '50'), 100);
+    const offset = Math.max(parseInt(searchParams.get('offset') || '0'), 0);
 
     const where: Prisma.BookingWhereInput = {};
     if (status) where.status = status;
@@ -34,8 +68,6 @@ export async function GET(req: NextRequest) {
       ];
     }
 
-    // Optimization: Fetch only required fields for list view
-    // Optimization: Implement pagination to avoid loading thousands of records
     const [bookings, totalCount] = await Promise.all([
       prisma.booking.findMany({
         where,
@@ -77,9 +109,30 @@ export async function GET(req: NextRequest) {
   }
 }
 
+// ─── POST – Create booking ────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   try {
+    // ── Rate limiting ──
+    const ip =
+      req.headers.get('x-forwarded-for')?.split(',')[0].trim() ||
+      req.headers.get('x-real-ip') ||
+      'unknown';
+
+    if (!checkRateLimit(ip)) {
+      return NextResponse.json(
+        { error: 'Too many booking attempts. Please wait an hour and try again.' },
+        { status: 429 }
+      );
+    }
+
     const body = await req.json();
+
+    // ── Honeypot check (bot trap) ──
+    if (body.website && body.website.length > 0) {
+      // Silently succeed to fool bots
+      return NextResponse.json({ id: 'bot', success: true }, { status: 200 });
+    }
+
     const {
       clientName,
       email,
@@ -87,31 +140,54 @@ export async function POST(req: NextRequest) {
       company,
       discussionTopic,
       callType,
-      date: localDate, // Local to client
-      startTime: localStart, // Local to client
+      date: localDate,
+      startTime: localStart,
       timeZone: clientTz,
       qualification,
     } = body;
 
-    // Validate required fields
-    if (!clientName || !email || !phone || !callType || !localDate || !localStart) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    // ── Server-side validation ──
+    const missingFields: string[] = [];
+    if (!clientName?.trim()) missingFields.push('name');
+    if (!email?.trim()) missingFields.push('email');
+    if (!phone?.trim()) missingFields.push('phone');
+    if (!callType) missingFields.push('call type');
+    if (!localDate) missingFields.push('date');
+    if (!localStart) missingFields.push('time');
+
+    if (missingFields.length > 0) {
+      return NextResponse.json(
+        { error: `Missing required fields: ${missingFields.join(', ')}` },
+        { status: 400 }
+      );
+    }
+
+    if (!isValidEmail(email)) {
+      return NextResponse.json(
+        { error: 'Please enter a valid email address.' },
+        { status: 400 }
+      );
+    }
+
+    if (!isValidPhone(phone)) {
+      return NextResponse.json(
+        { error: 'Please enter a valid phone number (digits, spaces, dashes, +, parentheses).' },
+        { status: 400 }
+      );
     }
 
     const duration = getCallDuration(callType as CallType);
 
-    // Convert local time to UTC and store as UTC strings
-    const startDateTimeLocal = toDate(`${localDate}T${localStart}:00`, { timeZone: clientTz });
+    // Convert local time to UTC
+    const startDateTimeLocal = toDate(`${localDate}T${localStart}:00`, { timeZone: clientTz || 'UTC' });
     const date = formatInTimeZone(startDateTimeLocal, 'UTC', 'yyyy-MM-dd');
     const startTime = formatInTimeZone(startDateTimeLocal, 'UTC', 'HH:mm');
-    
+
     const endDateTimeUTC = addMinutes(startDateTimeLocal, duration);
     const endTime = formatInTimeZone(endDateTimeUTC, 'UTC', 'HH:mm');
     const endDate = formatInTimeZone(endDateTimeUTC, 'UTC', 'yyyy-MM-dd');
 
-    // Check for double booking using the normalized UTC date/time range
-    // Note: A booking might span across two UTC dates, but for now we simplify 
-    // to checking the normalized start date.
+    // Double-booking check
     const existing = await prisma.booking.findFirst({
       where: {
         status: { not: 'CANCELLED' },
@@ -122,7 +198,7 @@ export async function POST(req: NextRequest) {
               { startTime: { lte: startTime }, endTime: { gt: startTime } },
               { startTime: { lt: endTime }, endTime: { gte: endTime } },
               { startTime: { gte: startTime }, endTime: { lte: endTime } },
-            ]
+            ],
           },
           {
             date: endDate,
@@ -130,31 +206,39 @@ export async function POST(req: NextRequest) {
               { startTime: { lte: startTime }, endTime: { gt: startTime } },
               { startTime: { lt: endTime }, endTime: { gte: endTime } },
               { startTime: { gte: startTime }, endTime: { lte: endTime } },
-            ]
-          }
-        ]
+            ],
+          },
+        ],
       },
     });
 
     if (existing) {
-      return NextResponse.json({ error: 'This time slot is no longer available' }, { status: 409 });
+      return NextResponse.json(
+        { error: 'This time slot is no longer available. Please choose another time.' },
+        { status: 409 }
+      );
     }
 
-    // Create calendar event & get meeting link
-    const calendarResult = await createCalendarEvent({
-      clientName,
-      email,
-      date,
-      startTime,
-      endTime,
-      discussionTopic: discussionTopic || '',
-      callType,
-    });
+    // Create calendar event (graceful fallback if it fails)
+    let meetingLink = '';
+    let calendarEventId = '';
+    try {
+      const calendarResult = await createCalendarEvent({
+        clientName,
+        email,
+        date,
+        startTime,
+        endTime,
+        discussionTopic: discussionTopic || '',
+        callType,
+      });
+      meetingLink = calendarResult?.meetingLink || '';
+      calendarEventId = calendarResult?.eventId || '';
+    } catch (calError) {
+      console.error('Calendar event creation failed (non-fatal):', calError);
+    }
 
-    const meetingLink = calendarResult?.meetingLink || '';
-    const calendarEventId = calendarResult?.eventId || '';
-
-    // Create booking
+    // Create booking in Prisma
     const booking = await prisma.booking.create({
       data: {
         clientName,
@@ -184,26 +268,28 @@ export async function POST(req: NextRequest) {
       include: { qualification: true },
     });
 
-    // Send confirmation email
-    try {
-      await sendConfirmationEmail({
+    // Send emails (non-blocking, errors logged)
+    const emailPromises = [
+      sendConfirmationEmail({
         id: booking.id,
         clientName: booking.clientName,
         email: booking.email,
+        phone: booking.phone,
+        company: booking.company ?? '',
         date: booking.date,
         startTime: booking.startTime,
         endTime: booking.endTime,
         callType: booking.callType,
         meetingLink: booking.meetingLink,
         timeZone: booking.timeZone,
-      });
-    } catch (emailError) {
-      console.error('Failed to send confirmation email:', emailError);
-    }
+        discussion: booking.discussionTopic ?? '',
+        problem: booking.qualification?.problem,
+        budget: booking.qualification?.budgetRange,
+        timeline: booking.qualification?.timeline,
+        priorAgency: booking.qualification?.workedWithAgencyBefore,
+      }).catch(e => console.error('Confirmation email failed:', e)),
 
-    // Send admin notification email
-    try {
-      await sendAdminNotificationEmail({
+      sendAdminNotificationEmail({
         clientName: booking.clientName,
         email: booking.email,
         phone: booking.phone,
@@ -219,25 +305,24 @@ export async function POST(req: NextRequest) {
         budget: booking.qualification?.budgetRange,
         timeline: booking.qualification?.timeline,
         priorAgency: booking.qualification?.workedWithAgencyBefore,
-      });
-    } catch (adminEmailError) {
-      console.error('Failed to send admin notification email:', adminEmailError);
-    }
+      }).catch(e => console.error('Admin email failed:', e)),
 
-    // Send admin SMS notification
-    try {
-      await sendAdminSMS({
+      sendAdminSMS({
         clientName: booking.clientName,
         date: booking.date,
         startTime: booking.startTime,
-      });
-    } catch (smsError) {
-      console.error('Failed to send admin SMS:', smsError);
-    }
+      }).catch(e => console.error('Admin SMS failed:', e)),
+    ];
+
+    // Fire emails in background (don't await to keep response fast)
+    Promise.all(emailPromises);
 
     return NextResponse.json(booking, { status: 201 });
   } catch (error) {
     console.error('Booking creation error:', error);
-    return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Failed to create booking. Please try again.' },
+      { status: 500 }
+    );
   }
 }
