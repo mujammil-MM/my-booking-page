@@ -1,9 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { SignJWT } from 'jose';
-
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || 'fallback-secret-at-least-32-chars-long'
-);
+import { createAdminSession } from '@/lib/adminSession';
 
 export async function POST(request: NextRequest) {
   try {
@@ -21,11 +17,7 @@ export async function POST(request: NextRequest) {
     const adminPassword = process.env.ADMIN_PASSWORD || 'Nova9890$';
 
     if (email === adminEmail && password === adminPassword) {
-      // Create JWT
-      const token = await new SignJWT({ email, role: 'admin' })
-        .setProtectedHeader({ alg: 'HS256' })
-        .setExpirationTime('24h')
-        .sign(JWT_SECRET);
+      const token = await createAdminSession(email);
 
       const response = NextResponse.json({ success: true });
       

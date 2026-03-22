@@ -1,9 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { jwtVerify } from 'jose';
-
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || 'fallback-secret-at-least-32-chars-long'
-);
+import { verifyAdminSession } from '@/lib/adminSession';
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -17,7 +13,7 @@ export async function middleware(request: NextRequest) {
     }
 
     try {
-      await jwtVerify(token, JWT_SECRET);
+      await verifyAdminSession(token);
       return NextResponse.next();
     } catch (error) {
       console.error('JWT verification failed:', error);
