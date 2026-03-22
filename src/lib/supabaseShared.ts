@@ -8,9 +8,12 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.warn('Supabase credentials missing in .env');
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase =
+  supabaseUrl && supabaseAnonKey
+    ? createClient(supabaseUrl, supabaseAnonKey)
+    : null;
 
-export const supabaseAdmin = supabaseServiceRoleKey
+export const supabaseAdmin = supabaseUrl && supabaseServiceRoleKey
   ? createClient(supabaseUrl, supabaseServiceRoleKey, {
       auth: {
         autoRefreshToken: false,
