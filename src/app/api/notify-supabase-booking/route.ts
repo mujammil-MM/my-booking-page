@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Resend } from 'resend';
 import { toDate, formatInTimeZone } from 'date-fns-tz';
 
-// Initialize Resend with the API key from environment variables
-const resend = new Resend(process.env.RESEND_API_KEY);
+const resendApiKey = process.env.RESEND_API_KEY || '';
+const resend = resendApiKey ? new Resend(resendApiKey) : null;
 
 export async function POST(req: NextRequest) {
   try {
@@ -63,6 +63,11 @@ export async function POST(req: NextRequest) {
 
     // The user requested sending this notification to their admin email address
     const adminEmail = process.env.ADMIN_EMAIL || 'nova.rosehearts@gmail.com';
+
+    if (!resend) {
+      console.warn('Supabase notification skipped: RESEND_API_KEY is missing.');
+      return NextResponse.json({ success: false, message: 'Resend is not configured' }, { status: 503 });
+    }
 
     await resend.emails.send({
       from: `"Supabase Notification" <onboarding@resend.dev>`,
