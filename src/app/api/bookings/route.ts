@@ -1,21 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { Prisma } from '@prisma/client';
-import { createCalendarEvent } from '@/lib/calendar';
-import { sendConfirmationEmail, sendAdminNotificationEmail } from '@/lib/email';
+import { createCalendarEvent, deleteCalendarEvent, updateCalendarEvent } from '@/lib/calendar';
+import { sendCancellationEmail, sendConfirmationEmail, sendAdminNotificationEmail } from '@/lib/email';
 import { sendAdminSMS } from '@/lib/sms';
+import { mirrorBookingToSupabase } from '@/lib/supabaseMirror';
 import { CallType, getCallDuration } from '@/lib/types';
 import { toDate, formatInTimeZone } from 'date-fns-tz';
-import { addMinutes } from 'date-fns';
+import { addDays, addMinutes } from 'date-fns';
 
-// ─── Rate Limiting ───────────────────────────────────────────────────────────
 interface RateLimitEntry {
   count: number;
   resetAt: number;
 }
+
 const rateLimitMap = new Map<string, RateLimitEntry>();
 const RATE_LIMIT_MAX = 5;
-const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 
 function checkRateLimit(ip: string): boolean {
   const now = Date.now();
@@ -23,78 +23,114 @@ function checkRateLimit(ip: string): boolean {
 
   if (!entry || now > entry.resetAt) {
     rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
-    return true; // allowed
+    return true;
   }
 
-  if (entry.count >= RATE_LIMIT_MAX) return false; // blocked
+  if (entry.count >= RATE_LIMIT_MAX) {
+    return false;
+  }
 
   entry.count += 1;
   return true;
 }
 
-// ─── Validation ──────────────────────────────────────────────────────────────
-function isValidEmail(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+const isValidPhone = (phone: string) => /^[\d\s+\-()]{7,20}$/.test(phone.trim());
+
+function getUtcRange(localDate: string, localStart: string, clientTz: string, duration: number) {
+  const startUtc = toDate(`${localDate}T${localStart}:00`, { timeZone: clientTz || 'UTC' });
+  const endUtc = addMinutes(startUtc, duration);
+
+  return {
+    date: formatInTimeZone(startUtc, 'UTC', 'yyyy-MM-dd'),
+    startTime: formatInTimeZone(startUtc, 'UTC', 'HH:mm'),
+    endTime: formatInTimeZone(endUtc, 'UTC', 'HH:mm'),
+    endDate: formatInTimeZone(endUtc, 'UTC', 'yyyy-MM-dd'),
+  };
 }
 
-function isValidPhone(phone: string): boolean {
-  return /^[\d\s\+\-\(\)]{7,20}$/.test(phone.trim());
+async function getBookingById(id: string) {
+  return prisma.booking.findUnique({
+    where: { id },
+    include: { qualification: true },
+  });
 }
 
-// ─── GET – List bookings (admin) ─────────────────────────────────────────────
+async function hasBookingConflict(idToExclude: string | null, date: string, startTime: string, endTime: string, endDate: string) {
+  return prisma.booking.findFirst({
+    where: {
+      ...(idToExclude ? { id: { not: idToExclude } } : {}),
+      status: { not: 'CANCELLED' },
+      OR: [
+        {
+          date,
+          OR: [
+            { startTime: { lte: startTime }, endTime: { gt: startTime } },
+            { startTime: { lt: endTime }, endTime: { gte: endTime } },
+            { startTime: { gte: startTime }, endTime: { lte: endTime } },
+          ],
+        },
+        {
+          date: endDate,
+          OR: [
+            { startTime: { lte: startTime }, endTime: { gt: startTime } },
+            { startTime: { lt: endTime }, endTime: { gte: endTime } },
+            { startTime: { gte: startTime }, endTime: { lte: endTime } },
+          ],
+        },
+      ],
+    },
+    select: { id: true },
+  });
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
+    const id = searchParams.get('id');
     const status = searchParams.get('status');
     const dateFrom = searchParams.get('dateFrom');
     const dateTo = searchParams.get('dateTo');
-    const query = searchParams.get('q');
-    const limit = Math.min(parseInt(searchParams.get('limit') || '50'), 100);
-    const offset = Math.max(parseInt(searchParams.get('offset') || '0'), 0);
+    const query = searchParams.get('q')?.trim();
+    const limit = Math.min(parseInt(searchParams.get('limit') || '50', 10), 100);
+    const offset = Math.max(parseInt(searchParams.get('offset') || '0', 10), 0);
 
-    const where: Prisma.BookingWhereInput = {};
-    if (status) where.status = status;
-    if (dateFrom && dateTo) {
-      where.date = { gte: dateFrom, lte: dateTo };
-    } else if (dateFrom) {
-      where.date = { gte: dateFrom };
+    if (id) {
+      const booking = await getBookingById(id);
+
+      if (!booking) {
+        return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
+      }
+
+      return NextResponse.json(booking);
     }
 
-    if (query) {
-      where.OR = [
-        { clientName: { contains: query } },
-        { email: { contains: query } },
-        { company: { contains: query } },
-      ];
-    }
+    const where = {
+      ...(status ? { status } : {}),
+      ...(dateFrom || dateTo
+        ? {
+            date: {
+              ...(dateFrom ? { gte: dateFrom } : {}),
+              ...(dateTo ? { lte: dateTo } : {}),
+            },
+          }
+        : {}),
+      ...(query
+        ? {
+            OR: [
+              { clientName: { contains: query } },
+              { email: { contains: query } },
+              { company: { contains: query } },
+              { discussionTopic: { contains: query } },
+            ],
+          }
+        : {}),
+    };
 
     const [bookings, totalCount] = await Promise.all([
       prisma.booking.findMany({
         where,
-        select: {
-          id: true,
-          clientName: true,
-          email: true,
-          phone: true,
-          company: true,
-          callType: true,
-          date: true,
-          startTime: true,
-          endTime: true,
-          status: true,
-          createdAt: true,
-          meetingLink: true,
-          timeZone: true,
-          discussionTopic: true,
-          qualification: {
-            select: {
-              problem: true,
-              budgetRange: true,
-              timeline: true,
-              workedWithAgencyBefore: true,
-            },
-          },
-        },
+        include: { qualification: true },
         orderBy: [{ date: 'desc' }, { startTime: 'desc' }],
         take: limit,
         skip: offset,
@@ -109,28 +145,148 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// ─── POST – Create booking ────────────────────────────────────────────────────
+export async function PATCH(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { id } = body;
+
+    if (!id) {
+      return NextResponse.json({ error: 'Booking id is required' }, { status: 400 });
+    }
+
+    const booking = await prisma.booking.findUnique({ where: { id } });
+    if (!booking) {
+      return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
+    }
+
+    if (body.date && body.startTime) {
+      if (booking.rescheduleCount >= 2) {
+        return NextResponse.json({ error: 'Maximum reschedules reached (2)' }, { status: 400 });
+      }
+
+      const clientTz = body.timeZone || booking.timeZone || 'UTC';
+      const duration = getCallDuration(booking.callType as CallType);
+      const startDateTimeUTC = toDate(`${body.date}T${body.startTime}:00`, { timeZone: clientTz });
+      const utcDate = formatInTimeZone(startDateTimeUTC, 'UTC', 'yyyy-MM-dd');
+      const utcStart = formatInTimeZone(startDateTimeUTC, 'UTC', 'HH:mm');
+      const endDateTimeUTC = addMinutes(startDateTimeUTC, duration);
+      const utcEnd = formatInTimeZone(endDateTimeUTC, 'UTC', 'HH:mm');
+      const utcEndDate = formatInTimeZone(endDateTimeUTC, 'UTC', 'yyyy-MM-dd');
+
+      const currentMeetingUTC = toDate(`${booking.date}T${booking.startTime}:00`, { timeZone: 'UTC' });
+      const now = new Date();
+      const hoursUntil = (currentMeetingUTC.getTime() - now.getTime()) / (1000 * 60 * 60);
+
+      if (hoursUntil < 2) {
+        return NextResponse.json(
+          { error: 'Cannot reschedule within 2 hours of the meeting' },
+          { status: 400 }
+        );
+      }
+
+      const conflict = await hasBookingConflict(id, utcDate, utcStart, utcEnd, utcEndDate);
+      if (conflict) {
+        return NextResponse.json({ error: 'New time slot is not available' }, { status: 409 });
+      }
+
+      if (booking.calendarEventId) {
+        await updateCalendarEvent(booking.calendarEventId, {
+          date: utcDate,
+          startTime: utcStart,
+          endTime: utcEnd,
+          clientName: booking.clientName,
+        });
+      }
+
+      const updated = await prisma.booking.update({
+        where: { id },
+        data: {
+          date: utcDate,
+          startTime: utcStart,
+          endTime: utcEnd,
+          timeZone: clientTz,
+          rescheduleCount: { increment: 1 },
+        },
+        include: { qualification: true },
+      });
+
+      return NextResponse.json(updated);
+    }
+
+    if (body.status) {
+      const updated = await prisma.booking.update({
+        where: { id },
+        data: { status: body.status },
+        include: { qualification: true },
+      });
+
+      return NextResponse.json(updated);
+    }
+
+    return NextResponse.json({ error: 'No valid update fields provided' }, { status: 400 });
+  } catch (error) {
+    console.error('Failed to update booking:', error);
+    return NextResponse.json({ error: 'Failed to update booking' }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { id } = body;
+
+    if (!id) {
+      return NextResponse.json({ error: 'Booking id is required' }, { status: 400 });
+    }
+
+    const booking = await prisma.booking.findUnique({ where: { id } });
+    if (!booking) {
+      return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
+    }
+
+    if (booking.calendarEventId) {
+      await deleteCalendarEvent(booking.calendarEventId);
+    }
+
+    const updated = await prisma.booking.update({
+      where: { id },
+      data: { status: 'CANCELLED' },
+    });
+
+    try {
+      await sendCancellationEmail({
+        clientName: booking.clientName,
+        email: booking.email,
+        date: booking.date,
+        startTime: booking.startTime,
+        timeZone: booking.timeZone,
+      });
+    } catch (error) {
+      console.error('Failed to send cancellation email:', error);
+    }
+
+    return NextResponse.json(updated);
+  } catch (error) {
+    console.error('Failed to cancel booking:', error);
+    return NextResponse.json({ error: 'Failed to cancel booking' }, { status: 500 });
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
-    // ── Rate limiting ──
     const ip =
       req.headers.get('x-forwarded-for')?.split(',')[0].trim() ||
       req.headers.get('x-real-ip') ||
       'unknown';
 
     if (!checkRateLimit(ip)) {
-      return NextResponse.json(
-        { error: 'Too many booking attempts. Please wait an hour and try again.' },
-        { status: 429 }
-      );
+      return NextResponse.json({ error: 'Too many attempts. Please try again later.' }, { status: 429 });
     }
 
     const body = await req.json();
 
-    // ── Honeypot check (bot trap) ──
     if (body.website && body.website.length > 0) {
-      // Silently succeed to fool bots
-      return NextResponse.json({ id: 'bot', success: true }, { status: 200 });
+      return NextResponse.json({ success: true, id: 'bot' });
     }
 
     const {
@@ -146,82 +302,28 @@ export async function POST(req: NextRequest) {
       qualification,
     } = body;
 
-    // ── Server-side validation ──
-    const missingFields: string[] = [];
-    if (!clientName?.trim()) missingFields.push('name');
-    if (!email?.trim()) missingFields.push('email');
-    if (!phone?.trim()) missingFields.push('phone');
-    if (!callType) missingFields.push('call type');
-    if (!localDate) missingFields.push('date');
-    if (!localStart) missingFields.push('time');
-
-    if (missingFields.length > 0) {
-      return NextResponse.json(
-        { error: `Missing required fields: ${missingFields.join(', ')}` },
-        { status: 400 }
-      );
+    if (!clientName || !email || !phone || !callType || !localDate || !localStart) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    if (!isValidEmail(email)) {
-      return NextResponse.json(
-        { error: 'Please enter a valid email address.' },
-        { status: 400 }
-      );
-    }
-
-    if (!isValidPhone(phone)) {
-      return NextResponse.json(
-        { error: 'Please enter a valid phone number (digits, spaces, dashes, +, parentheses).' },
-        { status: 400 }
-      );
+    if (!isValidEmail(email) || !isValidPhone(phone)) {
+      return NextResponse.json({ error: 'Invalid contact details' }, { status: 400 });
     }
 
     const duration = getCallDuration(callType as CallType);
+    const { date, startTime, endTime, endDate } = getUtcRange(localDate, localStart, clientTz || 'UTC', duration);
 
-    // Convert local time to UTC
-    const startDateTimeLocal = toDate(`${localDate}T${localStart}:00`, { timeZone: clientTz || 'UTC' });
-    const date = formatInTimeZone(startDateTimeLocal, 'UTC', 'yyyy-MM-dd');
-    const startTime = formatInTimeZone(startDateTimeLocal, 'UTC', 'HH:mm');
-
-    const endDateTimeUTC = addMinutes(startDateTimeLocal, duration);
-    const endTime = formatInTimeZone(endDateTimeUTC, 'UTC', 'HH:mm');
-    const endDate = formatInTimeZone(endDateTimeUTC, 'UTC', 'yyyy-MM-dd');
-
-    // Double-booking check
-    const existing = await prisma.booking.findFirst({
-      where: {
-        status: { not: 'CANCELLED' },
-        OR: [
-          {
-            date,
-            OR: [
-              { startTime: { lte: startTime }, endTime: { gt: startTime } },
-              { startTime: { lt: endTime }, endTime: { gte: endTime } },
-              { startTime: { gte: startTime }, endTime: { lte: endTime } },
-            ],
-          },
-          {
-            date: endDate,
-            OR: [
-              { startTime: { lte: startTime }, endTime: { gt: startTime } },
-              { startTime: { lt: endTime }, endTime: { gte: endTime } },
-              { startTime: { gte: startTime }, endTime: { lte: endTime } },
-            ],
-          },
-        ],
-      },
-    });
-
-    if (existing) {
+    const conflict = await hasBookingConflict(null, date, startTime, endTime, endDate);
+    if (conflict) {
       return NextResponse.json(
         { error: 'This time slot is no longer available. Please choose another time.' },
         { status: 409 }
       );
     }
 
-    // Create calendar event (graceful fallback if it fails)
     let meetingLink = '';
     let calendarEventId = '';
+
     try {
       const calendarResult = await createCalendarEvent({
         clientName,
@@ -232,13 +334,13 @@ export async function POST(req: NextRequest) {
         discussionTopic: discussionTopic || '',
         callType,
       });
+
       meetingLink = calendarResult?.meetingLink || '';
       calendarEventId = calendarResult?.eventId || '';
-    } catch (calError) {
-      console.error('Calendar event creation failed (non-fatal):', calError);
+    } catch (error) {
+      console.error('Calendar event creation failed:', error);
     }
 
-    // Create booking in Prisma
     const booking = await prisma.booking.create({
       data: {
         clientName,
@@ -268,32 +370,47 @@ export async function POST(req: NextRequest) {
       include: { qualification: true },
     });
 
-    // Send emails (non-blocking, errors logged)
-    const emailPromises = [
+    void mirrorBookingToSupabase({
+      clientName: booking.clientName,
+      email: booking.email,
+      phone: booking.phone,
+      company: booking.company,
+      callType: booking.callType,
+      date: booking.date,
+      startTime: booking.startTime,
+      meetingLink: booking.meetingLink,
+      discussion: booking.discussionTopic,
+      problem: booking.qualification?.problem,
+      budget: booking.qualification?.budgetRange,
+      timeline: booking.qualification?.timeline,
+      priorAgency: booking.qualification?.workedWithAgencyBefore,
+      clientTimeZone: booking.timeZone,
+    }).catch(error => console.error('Supabase mirror failed:', error));
+
+    void Promise.all([
       sendConfirmationEmail({
         id: booking.id,
         clientName: booking.clientName,
         email: booking.email,
         phone: booking.phone,
-        company: booking.company ?? '',
+        company: booking.company,
         date: booking.date,
         startTime: booking.startTime,
         endTime: booking.endTime,
         callType: booking.callType,
         meetingLink: booking.meetingLink,
         timeZone: booking.timeZone,
-        discussion: booking.discussionTopic ?? '',
+        discussion: booking.discussionTopic,
         problem: booking.qualification?.problem,
         budget: booking.qualification?.budgetRange,
         timeline: booking.qualification?.timeline,
         priorAgency: booking.qualification?.workedWithAgencyBefore,
-      }).catch(e => console.error('Confirmation email failed:', e)),
-
+      }).catch(error => console.error('Confirmation email failed:', error)),
       sendAdminNotificationEmail({
         clientName: booking.clientName,
         email: booking.email,
         phone: booking.phone,
-        company: booking.company || '',
+        company: booking.company,
         callType: booking.callType,
         date: booking.date,
         startTime: booking.startTime,
@@ -305,24 +422,17 @@ export async function POST(req: NextRequest) {
         budget: booking.qualification?.budgetRange,
         timeline: booking.qualification?.timeline,
         priorAgency: booking.qualification?.workedWithAgencyBefore,
-      }).catch(e => console.error('Admin email failed:', e)),
-
+      }).catch(error => console.error('Admin email failed:', error)),
       sendAdminSMS({
         clientName: booking.clientName,
         date: booking.date,
         startTime: booking.startTime,
-      }).catch(e => console.error('Admin SMS failed:', e)),
-    ];
-
-    // Fire emails in background (don't await to keep response fast)
-    Promise.all(emailPromises);
+      }).catch(error => console.error('Admin SMS failed:', error)),
+    ]);
 
     return NextResponse.json(booking, { status: 201 });
   } catch (error) {
-    console.error('Booking creation error:', error);
-    return NextResponse.json(
-      { error: 'Failed to create booking. Please try again.' },
-      { status: 500 }
-    );
+    console.error('Booking POST error:', error);
+    return NextResponse.json({ error: 'Server error' }, { status: 500 });
   }
 }

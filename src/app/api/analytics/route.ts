@@ -5,7 +5,6 @@ export async function GET() {
   try {
     const today = new Date().toISOString().split('T')[0];
 
-    // Use aggregations for faster computation
     const [counts, popularSlotsRaw, typeCountsRaw, upcomingCount] = await Promise.all([
       prisma.booking.groupBy({
         by: ['status'],
@@ -28,27 +27,24 @@ export async function GET() {
     ]);
 
     const statusCounts: Record<string, number> = {};
-    counts.forEach(c => {
-      statusCounts[c.status] = c._count._all;
-    });
+    for (const count of counts) {
+      statusCounts[count.status] = count._count._all;
+    }
 
-    const total = Object.values(statusCounts).reduce((a, b) => a + b, 0);
-    const cancelled = statusCounts['CANCELLED'] || 0;
-    const noShow = statusCounts['NO_SHOW'] || 0;
-    const completed = statusCounts['COMPLETED'] || 0;
+    const total = Object.values(statusCounts).reduce((sum, value) => sum + value, 0);
+    const cancelled = statusCounts.CANCELLED || 0;
+    const noShow = statusCounts.NO_SHOW || 0;
+    const completed = statusCounts.COMPLETED || 0;
 
-    const popularSlots = popularSlotsRaw.map(s => ({
-      time: s.startTime,
-      count: s._count._all,
+    const popularSlots = popularSlotsRaw.map(slot => ({
+      time: slot.startTime,
+      count: slot._count._all,
     }));
 
-    const bookingsByType = typeCountsRaw.map(t => ({
-      type: t.callType,
-      count: t._count._all,
+    const bookingsByType = typeCountsRaw.map(type => ({
+      type: type.callType,
+      count: type._count._all,
     }));
-
-    const cancellationRate = total > 0 ? Math.round((cancelled / total) * 100) : 0;
-    const noShowRate = total > 0 ? Math.round((noShow / total) * 100) : 0;
 
     return NextResponse.json({
       totalBookings: total,
@@ -56,8 +52,8 @@ export async function GET() {
       completedBookings: completed,
       cancelledBookings: cancelled,
       noShowBookings: noShow,
-      cancellationRate,
-      noShowRate,
+      cancellationRate: total > 0 ? Math.round((cancelled / total) * 100) : 0,
+      noShowRate: total > 0 ? Math.round((noShow / total) * 100) : 0,
       popularSlots,
       bookingsByType,
     });

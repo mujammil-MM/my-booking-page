@@ -6,6 +6,7 @@ export async function GET() {
     const holidays = await prisma.holiday.findMany({
       orderBy: { date: 'asc' },
     });
+
     return NextResponse.json(holidays, {
       headers: {
         'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300',
@@ -20,6 +21,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const { date, note } = await req.json();
+
     if (!date) {
       return NextResponse.json({ error: 'Date is required' }, { status: 400 });
     }
@@ -27,12 +29,33 @@ export async function POST(req: NextRequest) {
     const holiday = await prisma.holiday.create({
       data: { date, note: note || '' },
     });
+
     return NextResponse.json(holiday, { status: 201 });
   } catch (error) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'P2002') {
       return NextResponse.json({ error: 'Holiday already exists for this date' }, { status: 409 });
     }
+
     console.error('Failed to create holiday:', error);
     return NextResponse.json({ error: 'Failed to create holiday' }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { id } = await req.json();
+
+    if (!id) {
+      return NextResponse.json({ error: 'Holiday id is required' }, { status: 400 });
+    }
+
+    await prisma.holiday.delete({
+      where: { id },
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('Failed to delete holiday:', error);
+    return NextResponse.json({ error: 'Failed to delete holiday' }, { status: 500 });
   }
 }

@@ -1,11 +1,11 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import CalendarPicker from '@/components/CalendarPicker';
 import TimeSlotGrid from '@/components/TimeSlotGrid';
 import { BookingResponse, TimeSlot, CallType } from '@/lib/types';
-
 import { toDate, formatInTimeZone } from 'date-fns-tz';
 
 function formatTime12h(time24: string, dateStr: string, timeZone: string): string {
@@ -19,6 +19,7 @@ function formatDate(dateStr: string, timeZone: string): string {
 }
 
 export default function ReschedulePage() {
+  const router = useRouter();
   const params = useParams();
   const id = params.id as string;
   const [booking, setBooking] = useState<BookingResponse | null>(null);
@@ -33,16 +34,28 @@ export default function ReschedulePage() {
 
   useEffect(() => {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (tz) setTimeZone(tz);
+    if (tz) {
+      setTimeZone(tz);
+    }
 
-    fetch(`/api/bookings/${id}`)
-      .then(r => r.json())
-      .then(data => { setBooking(data); setLoading(false); })
+    fetch(`/api/bookings?id=${id}`)
+      .then(async r => {
+        if (!r.ok) {
+          throw new Error('Booking fetch failed');
+        }
+
+        return r.json();
+      })
+      .then(data => {
+        setBooking(data);
+        setLoading(false);
+      })
       .catch(() => setLoading(false));
   }, [id]);
 
   const fetchSlots = useCallback(async (date: string, callType: CallType, tz: string) => {
     setLoadingSlots(true);
+
     try {
       const res = await fetch(`/api/availability?date=${date}&callType=${callType}&timezone=${tz}`);
       const data = await res.json();
@@ -50,6 +63,7 @@ export default function ReschedulePage() {
     } catch {
       setTimeSlots([]);
     }
+
     setLoadingSlots(false);
   }, []);
 
@@ -61,18 +75,22 @@ export default function ReschedulePage() {
   }, [selectedDate, booking, timeZone, fetchSlots]);
 
   async function handleReschedule() {
-    if (!selectedDate || !selectedTime) return;
+    if (!selectedDate || !selectedTime) {
+      return;
+    }
+
     setSubmitting(true);
     setError('');
 
     try {
-      const res = await fetch(`/api/bookings/${id}`, {
+      const res = await fetch('/api/bookings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          date: selectedDate, 
+        body: JSON.stringify({
+          id,
+          date: selectedDate,
           startTime: selectedTime,
-          timeZone: timeZone // Ensure server knows original client context
+          timeZone,
         }),
       });
 
@@ -83,7 +101,8 @@ export default function ReschedulePage() {
         return;
       }
 
-      window.location.href = `/confirmation/${id}`;
+      router.push(`/confirmation/${id}`);
+      router.refresh();
     } catch {
       setError('Something went wrong. Please try again.');
       setSubmitting(false);
@@ -117,7 +136,9 @@ export default function ReschedulePage() {
           <p>You have reached the maximum number of reschedules (2). Please cancel and create a new booking.</p>
         </div>
         <div style={{ textAlign: 'center' }}>
-          <a href={`/cancel/${id}`} className="btn btn-secondary">Cancel Booking</a>
+          <Link href={`/cancel/${id}`} className="btn btn-secondary">
+            Cancel Booking
+          </Link>
         </div>
       </div>
     );
@@ -126,11 +147,13 @@ export default function ReschedulePage() {
   return (
     <div className="page-container">
       <header className="page-header">
-        <div className="badge">🔄 Reschedule</div>
+        <div className="badge">Reschedule</div>
         <h1>Reschedule Your Call</h1>
         <p>
-          Current booking: <strong>{formatDate(booking.date, booking.timeZone)}</strong> at <strong>{formatTime12h(booking.startTime, booking.date, booking.timeZone)}</strong>
-          <br />Reschedules remaining: <strong>{2 - booking.rescheduleCount}</strong>
+          Current booking: <strong>{formatDate(booking.date, booking.timeZone)}</strong> at{' '}
+          <strong>{formatTime12h(booking.startTime, booking.date, booking.timeZone)}</strong>
+          <br />
+          Reschedules remaining: <strong>{2 - booking.rescheduleCount}</strong>
         </p>
       </header>
 
@@ -166,7 +189,7 @@ export default function ReschedulePage() {
           {submitting ? (
             <><span className="spinner" /> Rescheduling...</>
           ) : (
-            '✓ Confirm Reschedule'
+            'Confirm Reschedule'
           )}
         </button>
       </div>

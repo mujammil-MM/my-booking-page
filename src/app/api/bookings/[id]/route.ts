@@ -8,9 +8,9 @@ import { addMinutes } from 'date-fns';
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: { id: string } }
 ) {
-  const { id } = await params;
+  const { id } = params;
   const booking = await prisma.booking.findUnique({
     where: { id },
     include: { qualification: true },
@@ -25,9 +25,9 @@ export async function GET(
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: { id: string } }
 ) {
-  const { id } = await params;
+  const { id } = params;
   const body = await req.json();
 
   const booking = await prisma.booking.findUnique({ where: { id } });
@@ -135,9 +135,9 @@ export async function PATCH(
 
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: { id: string } }
 ) {
-  const { id } = await params;
+  const { id } = params;
 
   const booking = await prisma.booking.findUnique({ where: { id } });
   if (!booking) {

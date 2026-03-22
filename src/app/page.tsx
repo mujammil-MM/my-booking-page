@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
+import { useRouter } from 'next/navigation';
 import CallTypeSelector from '@/components/CallTypeSelector';
 import CalendarPicker from '@/components/CalendarPicker';
 import TimeSlotGrid from '@/components/TimeSlotGrid';
@@ -8,13 +9,14 @@ import { CallType, TimeSlot } from '@/lib/types';
 import TimezoneSelector from '@/components/TimezoneSelector';
 
 const ClientInfoForm = dynamic(() => import('@/components/ClientInfoForm'), {
-  loading: () => <div className="skeleton" style={{ height: '300px' }} />,
+  loading: () => <div className="skeleton skeleton-h-300" />,
 });
 const QualificationForm = dynamic(() => import('@/components/QualificationForm'), {
-  loading: () => <div className="skeleton" style={{ height: '200px' }} />,
+  loading: () => <div className="skeleton skeleton-h-200" />,
 });
 
 export default function BookingPage() {
+  const router = useRouter();
   const [step, setStep] = useState(1);
   const [callType, setCallType] = useState<CallType | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -43,11 +45,13 @@ export default function BookingPage() {
   const [holidays, setHolidays] = useState<{ id: string; date: string; note: string }[]>([]);
   const [holidayMode, setHolidayMode] = useState(false);
   const [isHolidayToday, setIsHolidayToday] = useState(false);
+  const [loadingSettings, setLoadingSettings] = useState(true);
 
   useEffect(() => {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
     if (tz) setTimeZone(tz);
 
+    setLoadingSettings(true);
     // Fetch holidays and settings in parallel (with caching)
     Promise.all([
       fetch('/api/holidays', { next: { revalidate: 300 } } as RequestInit).then(r => r.json()),
@@ -61,6 +65,8 @@ export default function BookingPage() {
       setIsHolidayToday(foundToday);
     }).catch(() => {
       // Non-fatal: silently continue if settings fail to load
+    }).finally(() => {
+      setLoadingSettings(false);
     });
   }, []);
 
@@ -114,6 +120,15 @@ export default function BookingPage() {
     setErrorMsg(null);
 
     try {
+      console.log("Submitting booking", {
+        ...clientInfo,
+        callType,
+        date: selectedDate,
+        startTime: selectedTime,
+        timeZone,
+        qualification,
+      });
+
       const res = await fetch('/api/bookings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -129,14 +144,15 @@ export default function BookingPage() {
       });
 
       if (!res.ok) {
-        const err = await res.json();
-        setErrorMsg(err.error || 'Booking failed. Please try again.');
         setSubmitting(false);
+        const err = await res.json();
+        setErrorMsg(err.error || 'Booking failed, please try again');
         return;
       }
 
       const booking = await res.json();
-      window.location.href = `/confirmation/${booking.id}`;
+      router.push(`/confirmation/${booking.id}`);
+      router.refresh();
     } catch {
       setErrorMsg('Something went wrong. Please check your connection and try again.');
       setSubmitting(false);
@@ -167,13 +183,17 @@ export default function BookingPage() {
         </p>
       </header>
 
-      {isAppDisabled && (
-        <div className="holiday-banner">
+      {loadingSettings ? (
+        <div className="section section-animate">
+          <div className="skeleton skeleton-h-100" style={{ marginBottom: '20px' }} />
+        </div>
+      ) : isAppDisabled ? (
+        <div className="holiday-banner section-animate">
           <div className="emoji">🏖️</div>
           <h2>We are on holiday</h2>
           <p>We are currently on holiday and not accepting bookings right now. Please check back later. We will update availability soon.</p>
         </div>
-      )}
+      ) : null}
 
       {/* Progress Steps */}
       <div className={`progress-steps ${isAppDisabled ? 'disabled' : ''}`} style={isAppDisabled ? { opacity: 0.5, pointerEvents: 'none' } : {}}>
@@ -199,16 +219,24 @@ export default function BookingPage() {
       </div>
 
       {/* Step 1: Call Type */}
-      <div className="section" style={isAppDisabled ? { opacity: 0.5, pointerEvents: 'none' } : {}}>
+      <div className="section section-animate" style={isAppDisabled ? { opacity: 0.5, pointerEvents: 'none' } : {}}>
         <div className="section-title">
           <span className="step-number">1</span>
           Select Call Type
         </div>
-        <CallTypeSelector selected={callType} onSelect={handleCallTypeSelect} />
+        {loadingSettings ? (
+          <div className="call-types">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="skeleton skeleton-h-120" />
+            ))}
+          </div>
+        ) : (
+          <CallTypeSelector selected={callType} onSelect={handleCallTypeSelect} />
+        )}
       </div>
 
       {/* Timezone Switcher */}
-      <div className="section" style={isAppDisabled ? { opacity: 0.5, pointerEvents: 'none' } : {}}>
+      <div className="section section-animate" style={isAppDisabled ? { opacity: 0.5, pointerEvents: 'none' } : {}}>
         <TimezoneSelector
           value={timeZone}
           onChange={setTimeZone}
@@ -217,7 +245,7 @@ export default function BookingPage() {
 
       {/* Step 2: Calendar & Time */}
       {callType && (
-        <div className="section calendar-time-grid" style={isAppDisabled ? { opacity: 0.5, pointerEvents: 'none' } : {}}>
+        <div className="section calendar-time-grid section-animate" style={isAppDisabled ? { opacity: 0.5, pointerEvents: 'none' } : {}}>
           <div>
             <div className="section-title">
               <span className="step-number">2</span>
@@ -226,7 +254,7 @@ export default function BookingPage() {
             <CalendarPicker
               selectedDate={selectedDate}
               onSelectDate={handleDateSelect}
-              blockedDates={holidays.map(h => h.date)}
+              blockedDates={Array.isArray(holidays) ? holidays.map(h => h.date) : []}
             />
           </div>
           <div>
@@ -273,9 +301,9 @@ export default function BookingPage() {
 
       {/* Submit */}
       {selectedTime && (
-        <div className="section confirm-btn-container" style={{ textAlign: 'center', paddingBottom: '60px' }}>
+        <div className="section confirm-btn-container section-animate" style={{ textAlign: 'center', paddingBottom: '60px' }}>
           {errorMsg && (
-            <div className="error-banner" role="alert">
+            <div className="error-banner section-animate" role="alert">
               <span className="error-banner-icon">⚠</span>
               {errorMsg}
             </div>

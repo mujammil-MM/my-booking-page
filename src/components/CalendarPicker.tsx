@@ -77,11 +77,19 @@ const CalendarPicker = memo(({ selectedDate, onSelectDate, blockedDates = [] }: 
   return (
     <div className="calendar-container">
       <div className="calendar-nav">
-        <button type="button" onClick={prevMonth} disabled={!canGoPrev} style={{ opacity: canGoPrev ? 1 : 0.3 }}>
+        <button 
+          type="button" 
+          onClick={prevMonth} 
+          disabled={!canGoPrev} 
+          className="trans-fast"
+          style={{ opacity: canGoPrev ? 1 : 0.3 }}
+        >
           ‹
         </button>
         <h3>{MONTH_NAMES[viewMonth]} {viewYear}</h3>
-        <button type="button" onClick={nextMonth}>›</button>
+        <button type="button" onClick={nextMonth} className="trans-fast">
+          ›
+        </button>
       </div>
 
       <div className="calendar-grid">

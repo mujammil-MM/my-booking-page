@@ -1,11 +1,10 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { BookingResponse } from '@/lib/types';
-
 import { formatTime12h, formatDate } from '@/lib/utils';
-
 
 export default function CancelPage() {
   const params = useParams();
@@ -16,22 +15,38 @@ export default function CancelPage() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    fetch(`/api/bookings/${id}`)
-      .then(r => r.json())
-      .then(data => { setBooking(data); setLoading(false); })
+    fetch(`/api/bookings?id=${id}`)
+      .then(async r => {
+        if (!r.ok) {
+          throw new Error('Booking fetch failed');
+        }
+
+        return r.json();
+      })
+      .then(data => {
+        setBooking(data);
+        setLoading(false);
+      })
       .catch(() => setLoading(false));
   }, [id]);
 
   async function handleCancel() {
     setSubmitting(true);
+
     try {
-      const res = await fetch(`/api/bookings/${id}`, { method: 'DELETE' });
+      const res = await fetch('/api/bookings', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+
       if (res.ok) {
         setCancelled(true);
       }
     } catch {
       alert('Failed to cancel. Please try again.');
     }
+
     setSubmitting(false);
   }
 
@@ -57,14 +72,19 @@ export default function CancelPage() {
     return (
       <div className="page-container">
         <header className="page-header">
-          <div className="confirmation-icon" style={{ borderColor: 'rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.1)' }}>
-            ✕
+          <div
+            className="confirmation-icon"
+            style={{ borderColor: 'rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.1)' }}
+          >
+            X
           </div>
           <h1>Booking Cancelled</h1>
           <p>Your booking has been cancelled. We hope to hear from you again!</p>
         </header>
         <div style={{ textAlign: 'center' }}>
-          <a href="/" className="btn btn-primary">← Book a New Call</a>
+          <Link href="/" className="btn btn-primary">
+            Book a New Call
+          </Link>
         </div>
       </div>
     );
@@ -85,7 +105,11 @@ export default function CancelPage() {
           </div>
           <div className="detail-row">
             <span className="label">Time</span>
-            <span className="value">{formatTime12h(booking.startTime, booking.date, booking.timeZone)} – {formatTime12h(booking.endTime, booking.date, booking.timeZone)}</span>
+            <span className="value">
+              {formatTime12h(booking.startTime, booking.date, booking.timeZone)}
+              {' - '}
+              {formatTime12h(booking.endTime, booking.date, booking.timeZone)}
+            </span>
           </div>
           <div className="detail-row">
             <span className="label">Timezone</span>
@@ -98,7 +122,9 @@ export default function CancelPage() {
         </div>
 
         <div className="confirmation-actions" style={{ justifyContent: 'center' }}>
-          <a href={`/confirmation/${id}`} className="btn btn-secondary">← Keep Booking</a>
+          <Link href={`/confirmation/${id}`} className="btn btn-secondary">
+            Keep Booking
+          </Link>
           <button
             className="btn btn-danger"
             onClick={handleCancel}

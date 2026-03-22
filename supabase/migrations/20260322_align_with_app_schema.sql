@@ -1,0 +1,98 @@
+create extension if not exists pgcrypto;
+
+create or replace function public.set_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new."updatedAt" = now();
+  return new;
+end;
+$$;
+
+create table if not exists public.bookings (
+  id text primary key default gen_random_uuid()::text,
+  email text not null,
+  phone text not null,
+  company text not null default '',
+  date text not null
+);
+
+alter table public.bookings
+  add column if not exists "clientName" text not null default '',
+  add column if not exists "discussionTopic" text not null default '',
+  add column if not exists "callType" text not null default 'INTRO_15',
+  add column if not exists "startTime" text not null default '00:00',
+  add column if not exists "endTime" text not null default '00:00',
+  add column if not exists "timeZone" text not null default 'UTC',
+  add column if not exists "meetingLink" text not null default '',
+  add column if not exists "calendarEventId" text not null default '',
+  add column if not exists status text not null default 'CONFIRMED',
+  add column if not exists "rescheduleCount" integer not null default 0,
+  add column if not exists "createdAt" timestamptz not null default now(),
+  add column if not exists "updatedAt" timestamptz not null default now();
+
+create index if not exists bookings_date_idx on public.bookings (date);
+create index if not exists bookings_status_idx on public.bookings (status);
+create index if not exists bookings_created_at_idx on public.bookings ("createdAt");
+
+drop trigger if exists bookings_set_updated_at on public.bookings;
+create trigger bookings_set_updated_at
+before update on public.bookings
+for each row
+execute function public.set_updated_at();
+
+create table if not exists public.qualification_answers (
+  id text primary key default gen_random_uuid()::text,
+  "bookingId" text not null unique references public.bookings (id) on delete cascade,
+  problem text not null default '',
+  "budgetRange" text not null default '',
+  timeline text not null default '',
+  "workedWithAgencyBefore" text not null default ''
+);
+
+create table if not exists public.blocked_slots (
+  id text primary key default gen_random_uuid()::text,
+  date text not null,
+  "startTime" text not null,
+  "endTime" text not null,
+  reason text not null default ''
+);
+
+create index if not exists blocked_slots_date_idx on public.blocked_slots (date);
+
+create table if not exists public.holidays (
+  id text primary key default gen_random_uuid()::text,
+  date text not null unique,
+  note text not null default '',
+  "createdAt" timestamptz not null default now()
+);
+
+create index if not exists holidays_date_idx on public.holidays (date);
+
+create table if not exists public.global_settings (
+  id text primary key default 'default',
+  "holidayMode" boolean not null default false,
+  "updatedAt" timestamptz not null default now()
+);
+
+drop trigger if exists global_settings_set_updated_at on public.global_settings;
+create trigger global_settings_set_updated_at
+before update on public.global_settings
+for each row
+execute function public.set_updated_at();
+
+insert into public.global_settings (id, "holidayMode")
+values ('default', false)
+on conflict (id) do nothing;
+
+create table if not exists public.reminder_logs (
+  id text primary key default gen_random_uuid()::text,
+  "bookingId" text not null references public.bookings (id) on delete cascade,
+  type text not null,
+  "scheduledFor" text not null,
+  "sentAt" timestamptz
+);
+
+create index if not exists reminder_logs_booking_id_idx on public.reminder_logs ("bookingId");
+create index if not exists reminder_logs_scheduled_for_idx on public.reminder_logs ("scheduledFor");

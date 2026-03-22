@@ -13,20 +13,20 @@
   --text-muted: #71717a;
   --text-dim: #52525b;
   
-  --accent-primary: #6366f1;
-  --accent-secondary: #8b5cf6;
-  --accent-gradient: linear-gradient(135deg, #6366f1, #8b5cf6);
-  --accent-glow: rgba(99, 102, 241, 0.15);
-  --accent-glow-strong: rgba(99, 102, 241, 0.3);
+  --accent-primary: #818cf8;
+  --accent-secondary: #a78bfa;
+  --accent-gradient: linear-gradient(135deg, #818cf8, #a78bfa, #c084fc);
+  --accent-glow: rgba(129, 140, 248, 0.15);
+  --accent-glow-strong: rgba(129, 140, 248, 0.3);
   
-  --success: #22c55e;
+  --success: #10b981;
   --warning: #f59e0b;
-  --danger: #ef4444;
-  --info: #3b82f6;
+  --danger: #f43f5e;
+  --info: #0ea5e9;
   
-  --border: #27272a;
-  --border-hover: #3f3f46;
-  --border-accent: rgba(99, 102, 241, 0.3);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-hover: rgba(255, 255, 255, 0.15);
+  --border-accent: rgba(129, 140, 248, 0.4);
   
   /* Spacing */
   --radius-sm: 8px;
@@ -45,6 +45,15 @@
   --transition-base: 0.25s ease;
   --transition-slow: 0.4s ease;
 }
+
+/* Skeleton sizing utilities */
+.skeleton-h-100 { height: 100px; }
+.skeleton-h-120 { height: 120px; }
+.skeleton-h-200 { height: 200px; }
+.skeleton-h-300 { height: 300px; }
+.skeleton-h-40 { height: 40px; }
+
+.trans-fast { transition: all var(--transition-fast); }
 
 * {
   margin: 0;
@@ -164,11 +173,40 @@ body::before {
 
 .card:hover {
   border-color: var(--border-hover);
+  background: rgba(24, 24, 27, 0.8);
+  transform: translateY(-2px);
 }
 
 .card-glow:hover {
   border-color: var(--border-accent);
-  box-shadow: var(--shadow-glow);
+  box-shadow: 0 0 40px rgba(129, 140, 248, 0.15);
+}
+
+/* ========== ANIMATIONS ========== */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeInScale {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.section-animate {
+  animation: fadeInUp 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--bg-tertiary) 50%, var(--bg-secondary) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite linear;
+  border-radius: var(--radius-sm);
 }
 
 /* ========== SECTION ========== */
