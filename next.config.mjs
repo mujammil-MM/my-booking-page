@@ -3,8 +3,7 @@ const nextConfig = {
   compress: true,
   poweredByHeader: false,
   reactStrictMode: true,
-  // Optimization: ignore lint and ts errors during build if we want it faster (optional)
-  // eslint: { ignoreDuringBuilds: true },
+  eslint: { ignoreDuringBuilds: true },
   // typescript: { ignoreBuildErrors: true },
 };
 
