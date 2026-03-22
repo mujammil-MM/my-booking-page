@@ -6,7 +6,7 @@ import { sendAdminSMS } from '@/lib/sms';
 import { mirrorBookingToSupabase } from '@/lib/supabaseMirror';
 import { CallType, getCallDuration } from '@/lib/types';
 import { toDate, formatInTimeZone } from 'date-fns-tz';
-import { addDays, addMinutes } from 'date-fns';
+import { addMinutes } from 'date-fns';
 
 interface RateLimitEntry {
   count: number;
