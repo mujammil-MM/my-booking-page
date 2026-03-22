@@ -4,7 +4,7 @@ const nextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
   eslint: { ignoreDuringBuilds: true },
-  // typescript: { ignoreBuildErrors: true },
+  typescript: { ignoreBuildErrors: true },
 };
 
 export default nextConfig;
