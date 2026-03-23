@@ -29,6 +29,7 @@ const CalendarPicker = memo(({ selectedDate, onSelectDate, blockedDates = [] }: 
 
   const firstDay = new Date(viewYear, viewMonth, 1).getDay();
   const daysInMonthCount = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const daysInPrevMonth = new Date(viewYear, viewMonth, 0).getDate();
 
   function prevMonth() {
     if (viewMonth === 0) {
@@ -49,9 +50,18 @@ const CalendarPicker = memo(({ selectedDate, onSelectDate, blockedDates = [] }: 
   }
 
   const days = [];
-  // Empty slots
+  // Previous month trailing dates
   for (let i = 0; i < firstDay; i++) {
-    days.push(<div key={`empty-${viewYear}-${viewMonth}-${i}`} className="day empty" />);
+    const dayNumber = daysInPrevMonth - firstDay + i + 1;
+    days.push(
+      <div
+        key={`prev-${viewYear}-${viewMonth}-${i}`}
+        className="day empty disabled"
+        aria-hidden="true"
+      >
+        {dayNumber}
+      </div>
+    );
   }
 
   // Days
@@ -76,6 +86,20 @@ const CalendarPicker = memo(({ selectedDate, onSelectDate, blockedDates = [] }: 
       >
         {d}
       </button>
+    );
+  }
+
+  // Next month leading dates to complete the last week row
+  const trailingDays = (7 - (days.length % 7)) % 7;
+  for (let d = 1; d <= trailingDays; d++) {
+    days.push(
+      <div
+        key={`next-${viewYear}-${viewMonth}-${d}`}
+        className="day empty disabled"
+        aria-hidden="true"
+      >
+        {d}
+      </div>
     );
   }
 
