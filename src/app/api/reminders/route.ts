@@ -1,27 +1,72 @@
 import { NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
+import { listBookingsData } from '@/lib/dataStore';
 import { sendReminderEmail } from '@/lib/email';
+import prisma from '@/lib/prisma';
+import { supabaseAdmin } from '@/lib/supabaseShared';
+
+async function hasReminderLog(bookingId: string, scheduledFor: string) {
+  if (!supabaseAdmin) {
+    const existingLog = await prisma.reminderLog.findFirst({
+      where: {
+        bookingId,
+        scheduledFor,
+      },
+      select: { id: true },
+    });
+
+    return Boolean(existingLog);
+  }
+
+  const result = await supabaseAdmin
+    .from('reminder_logs')
+    .select('id')
+    .eq('bookingId', bookingId)
+    .eq('scheduledFor', scheduledFor)
+    .maybeSingle();
+
+  if (result.error) {
+    console.warn('Reminder log lookup skipped:', result.error.message);
+    return false;
+  }
+
+  return Boolean(result.data);
+}
+
+async function createReminderLog(bookingId: string, scheduledFor: string) {
+  if (!supabaseAdmin) {
+    await prisma.reminderLog.create({
+      data: {
+        bookingId,
+        type: 'EMAIL',
+        scheduledFor,
+        sentAt: new Date(),
+      },
+    });
+    return;
+  }
+
+  const result = await supabaseAdmin.from('reminder_logs').insert({
+    bookingId,
+    type: 'EMAIL',
+    scheduledFor,
+    sentAt: new Date().toISOString(),
+  });
+
+  if (result.error) {
+    console.warn('Reminder log write skipped:', result.error.message);
+  }
+}
 
 export async function POST() {
   try {
     const now = new Date();
     const today = now.toISOString().split('T')[0];
 
-    const bookings = await prisma.booking.findMany({
-      where: {
-        status: 'CONFIRMED',
-        date: { gte: today },
-      },
-      select: {
-        id: true,
-        clientName: true,
-        email: true,
-        date: true,
-        startTime: true,
-        meetingLink: true,
-        callType: true,
-        timeZone: true,
-      },
+    const { bookings } = await listBookingsData({
+      status: 'CONFIRMED',
+      dateFrom: today,
+      limit: 500,
+      offset: 0,
     });
 
     let sentCount = 0;
@@ -41,15 +86,7 @@ export async function POST() {
           continue;
         }
 
-        const existingLog = await prisma.reminderLog.findFirst({
-          where: {
-            bookingId: booking.id,
-            scheduledFor: reminder.label,
-          },
-          select: { id: true },
-        });
-
-        if (existingLog) {
+        if (await hasReminderLog(booking.id, reminder.label)) {
           continue;
         }
 
@@ -67,14 +104,7 @@ export async function POST() {
           reminder.label
         );
 
-        await prisma.reminderLog.create({
-          data: {
-            bookingId: booking.id,
-            type: 'EMAIL',
-            scheduledFor: reminder.label,
-            sentAt: new Date(),
-          },
-        });
+        await createReminderLog(booking.id, reminder.label);
 
         sentCount += 1;
       }

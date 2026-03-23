@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
 import { CallType, getCallDuration } from '@/lib/types';
+import { findBookingConflictData } from '@/lib/dataStore';
 import { toDate, formatInTimeZone } from 'date-fns-tz';
 import { addMinutes } from 'date-fns';
 
@@ -28,30 +28,7 @@ export async function POST(req: NextRequest) {
     const endTime = formatInTimeZone(endDateTimeUTC, 'UTC', 'HH:mm');
     const endDate = formatInTimeZone(endDateTimeUTC, 'UTC', 'yyyy-MM-dd');
 
-    const conflict = await prisma.booking.findFirst({
-      where: {
-        status: { not: 'CANCELLED' },
-        OR: [
-          {
-            date,
-            OR: [
-              { startTime: { lte: startTime }, endTime: { gt: startTime } },
-              { startTime: { lt: endTime }, endTime: { gte: endTime } },
-              { startTime: { gte: startTime }, endTime: { lte: endTime } },
-            ],
-          },
-          {
-            date: endDate,
-            OR: [
-              { startTime: { lte: startTime }, endTime: { gt: startTime } },
-              { startTime: { lt: endTime }, endTime: { gte: endTime } },
-              { startTime: { gte: startTime }, endTime: { lte: endTime } },
-            ],
-          },
-        ],
-      },
-      select: { id: true },
-    });
+    const conflict = await findBookingConflictData(null, date, startTime, endTime, endDate);
 
     return NextResponse.json({ available: !conflict });
   } catch (error) {

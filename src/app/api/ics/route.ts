@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
+import { getBookingData } from '@/lib/dataStore';
 import { generateICS } from '@/lib/ics';
 
 export async function GET(req: NextRequest) {
@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Booking id is required' }, { status: 400 });
     }
 
-    const booking = await prisma.booking.findUnique({ where: { id } });
+    const booking = await getBookingData(id);
     if (!booking) {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
     }

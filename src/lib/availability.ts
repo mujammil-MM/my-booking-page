@@ -1,5 +1,5 @@
 import { getCallDuration, CallType, TimeSlot } from './types';
-import prisma from './prisma';
+import { listBookingsForAvailability } from './dataStore';
 import { toDate, toZonedTime } from 'date-fns-tz';
 import { addDays, addHours, addMinutes, format } from 'date-fns';
 
@@ -28,16 +28,10 @@ export async function getAvailableSlots(
   const clientDayStart = toDate(`${dateStr}T00:00:00`, { timeZone: clientTimeZone });
   const clientDayEnd = toDate(`${dateStr}T23:59:59`, { timeZone: clientTimeZone });
 
-  const bookings = await prisma.booking.findMany({
-    where: {
-      status: { not: 'CANCELLED' },
-      date: {
-        gte: format(addHours(clientDayStart, -24), 'yyyy-MM-dd'),
-        lte: format(addHours(clientDayEnd, 24), 'yyyy-MM-dd'),
-      },
-    },
-    select: { date: true, startTime: true, endTime: true },
-  });
+  const bookings = await listBookingsForAvailability(
+    format(addHours(clientDayStart, -24), 'yyyy-MM-dd'),
+    format(addHours(clientDayEnd, 24), 'yyyy-MM-dd')
+  );
 
   const slots: TimeSlot[] = [];
 

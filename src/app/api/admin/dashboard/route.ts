@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
-import { getAnalyticsSummary } from '@/lib/analytics';
+import { getAnalyticsSummaryData, getBootstrapData, listBookingsData } from '@/lib/dataStore';
 
 export async function GET(req: NextRequest) {
   try {
@@ -8,46 +7,20 @@ export async function GET(req: NextRequest) {
     const query = searchParams.get('q')?.trim();
     const limit = Math.min(parseInt(searchParams.get('limit') || '20', 10), 100);
     const offset = Math.max(parseInt(searchParams.get('offset') || '0', 10), 0);
-
-    const where = query
-      ? {
-          OR: [
-            { clientName: { contains: query } },
-            { email: { contains: query } },
-            { company: { contains: query } },
-            { discussionTopic: { contains: query } },
-          ],
-        }
-      : {};
-
-    const [settings, holidays, analytics, bookings, totalCount] = await Promise.all([
-      prisma.globalSettings.findUnique({
-        where: { id: 'default' },
-        select: { holidayMode: true },
-      }),
-      prisma.holiday.findMany({
-        orderBy: { date: 'asc' },
-        select: { id: true, date: true, note: true },
-      }),
-      getAnalyticsSummary(),
-      prisma.booking.findMany({
-        where,
-        include: { qualification: true },
-        orderBy: [{ date: 'desc' }, { startTime: 'desc' }],
-        take: limit,
-        skip: offset,
-      }),
-      prisma.booking.count({ where }),
+    const [bootstrap, analytics, bookingPage] = await Promise.all([
+      getBootstrapData(),
+      getAnalyticsSummaryData(),
+      listBookingsData({ query, limit, offset }),
     ]);
 
     return NextResponse.json({
-      holidayMode: settings?.holidayMode ?? false,
-      holidays,
+      holidayMode: bootstrap.holidayMode,
+      holidays: bootstrap.holidays,
       analytics,
-      bookings,
-      totalCount,
-      limit,
-      offset,
+      bookings: bookingPage.bookings,
+      totalCount: bookingPage.totalCount,
+      limit: bookingPage.limit,
+      offset: bookingPage.offset,
     });
   } catch (error) {
     console.error('Failed to fetch admin dashboard:', error);

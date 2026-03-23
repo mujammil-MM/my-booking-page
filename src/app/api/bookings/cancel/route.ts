@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
+import { getBookingData, updateBookingData } from '@/lib/dataStore';
 import { sendCancellationEmail } from '@/lib/email';
 
 /**
@@ -15,9 +15,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'bookingId is required' }, { status: 400 });
     }
 
-    const booking = await prisma.booking.findUnique({
-      where: { id: bookingId },
-    });
+    const booking = await getBookingData(bookingId);
 
     if (!booking) {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
@@ -27,10 +25,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Booking is already cancelled' }, { status: 409 });
     }
 
-    const updated = await prisma.booking.update({
-      where: { id: bookingId },
-      data: { status: 'CANCELLED' },
-    });
+    const updated = await updateBookingData(bookingId, { status: 'CANCELLED' });
 
     // Send cancellation email (non-fatal)
     sendCancellationEmail({

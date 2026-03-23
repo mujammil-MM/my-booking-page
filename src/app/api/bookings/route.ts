@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
 import { createCalendarEvent, deleteCalendarEvent, updateCalendarEvent } from '@/lib/calendar';
 import { sendCancellationEmail, sendConfirmationEmail, sendAdminNotificationEmail } from '@/lib/email';
 import { sendAdminSMS } from '@/lib/sms';
-import { mirrorBookingToSupabase } from '@/lib/supabaseMirror';
 import { CallType, getCallDuration } from '@/lib/types';
+import {
+  createBookingData,
+  findBookingConflictData,
+  getBookingData,
+  listBookingsData,
+  updateBookingData,
+} from '@/lib/dataStore';
 import { toDate, formatInTimeZone } from 'date-fns-tz';
 import { addMinutes } from 'date-fns';
 
@@ -49,41 +54,6 @@ function getUtcRange(localDate: string, localStart: string, clientTz: string, du
   };
 }
 
-async function getBookingById(id: string) {
-  return prisma.booking.findUnique({
-    where: { id },
-    include: { qualification: true },
-  });
-}
-
-async function hasBookingConflict(idToExclude: string | null, date: string, startTime: string, endTime: string, endDate: string) {
-  return prisma.booking.findFirst({
-    where: {
-      ...(idToExclude ? { id: { not: idToExclude } } : {}),
-      status: { not: 'CANCELLED' },
-      OR: [
-        {
-          date,
-          OR: [
-            { startTime: { lte: startTime }, endTime: { gt: startTime } },
-            { startTime: { lt: endTime }, endTime: { gte: endTime } },
-            { startTime: { gte: startTime }, endTime: { lte: endTime } },
-          ],
-        },
-        {
-          date: endDate,
-          OR: [
-            { startTime: { lte: startTime }, endTime: { gt: startTime } },
-            { startTime: { lt: endTime }, endTime: { gte: endTime } },
-            { startTime: { gte: startTime }, endTime: { lte: endTime } },
-          ],
-        },
-      ],
-    },
-    select: { id: true },
-  });
-}
-
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -96,7 +66,7 @@ export async function GET(req: NextRequest) {
     const offset = Math.max(parseInt(searchParams.get('offset') || '0', 10), 0);
 
     if (id) {
-      const booking = await getBookingById(id);
+      const booking = await getBookingData(id);
 
       if (!booking) {
         return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
@@ -105,40 +75,16 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(booking);
     }
 
-    const where = {
-      ...(status ? { status } : {}),
-      ...(dateFrom || dateTo
-        ? {
-            date: {
-              ...(dateFrom ? { gte: dateFrom } : {}),
-              ...(dateTo ? { lte: dateTo } : {}),
-            },
-          }
-        : {}),
-      ...(query
-        ? {
-            OR: [
-              { clientName: { contains: query } },
-              { email: { contains: query } },
-              { company: { contains: query } },
-              { discussionTopic: { contains: query } },
-            ],
-          }
-        : {}),
-    };
-
-    const [bookings, totalCount] = await Promise.all([
-      prisma.booking.findMany({
-        where,
-        include: { qualification: true },
-        orderBy: [{ date: 'desc' }, { startTime: 'desc' }],
-        take: limit,
-        skip: offset,
-      }),
-      prisma.booking.count({ where }),
-    ]);
-
-    return NextResponse.json({ bookings, totalCount, limit, offset });
+    return NextResponse.json(
+      await listBookingsData({
+        status,
+        dateFrom,
+        dateTo,
+        query,
+        limit,
+        offset,
+      })
+    );
   } catch (error) {
     console.error('Failed to fetch bookings:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
@@ -154,7 +100,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Booking id is required' }, { status: 400 });
     }
 
-    const booking = await prisma.booking.findUnique({ where: { id } });
+    const booking = await getBookingData(id);
     if (!booking) {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
     }
@@ -184,7 +130,7 @@ export async function PATCH(req: NextRequest) {
         );
       }
 
-      const conflict = await hasBookingConflict(id, utcDate, utcStart, utcEnd, utcEndDate);
+      const conflict = await findBookingConflictData(id, utcDate, utcStart, utcEnd, utcEndDate);
       if (conflict) {
         return NextResponse.json({ error: 'New time slot is not available' }, { status: 409 });
       }
@@ -198,27 +144,19 @@ export async function PATCH(req: NextRequest) {
         });
       }
 
-      const updated = await prisma.booking.update({
-        where: { id },
-        data: {
-          date: utcDate,
-          startTime: utcStart,
-          endTime: utcEnd,
-          timeZone: clientTz,
-          rescheduleCount: { increment: 1 },
-        },
-        include: { qualification: true },
+      const updated = await updateBookingData(id, {
+        date: utcDate,
+        startTime: utcStart,
+        endTime: utcEnd,
+        timeZone: clientTz,
+        rescheduleCount: booking.rescheduleCount + 1,
       });
 
       return NextResponse.json(updated);
     }
 
     if (body.status) {
-      const updated = await prisma.booking.update({
-        where: { id },
-        data: { status: body.status },
-        include: { qualification: true },
-      });
+      const updated = await updateBookingData(id, { status: body.status });
 
       return NextResponse.json(updated);
     }
@@ -239,7 +177,7 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Booking id is required' }, { status: 400 });
     }
 
-    const booking = await prisma.booking.findUnique({ where: { id } });
+    const booking = await getBookingData(id);
     if (!booking) {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
     }
@@ -248,10 +186,7 @@ export async function DELETE(req: NextRequest) {
       await deleteCalendarEvent(booking.calendarEventId);
     }
 
-    const updated = await prisma.booking.update({
-      where: { id },
-      data: { status: 'CANCELLED' },
-    });
+    const updated = await updateBookingData(id, { status: 'CANCELLED' });
 
     try {
       await sendCancellationEmail({
@@ -313,7 +248,7 @@ export async function POST(req: NextRequest) {
     const duration = getCallDuration(callType as CallType);
     const { date, startTime, endTime, endDate } = getUtcRange(localDate, localStart, clientTz || 'UTC', duration);
 
-    const conflict = await hasBookingConflict(null, date, startTime, endTime, endDate);
+    const conflict = await findBookingConflictData(null, date, startTime, endTime, endDate);
     if (conflict) {
       return NextResponse.json(
         { error: 'This time slot is no longer available. Please choose another time.' },
@@ -341,51 +276,29 @@ export async function POST(req: NextRequest) {
       console.error('Calendar event creation failed:', error);
     }
 
-    const booking = await prisma.booking.create({
-      data: {
-        clientName,
-        email,
-        phone,
-        company: company || '',
-        discussionTopic: discussionTopic || '',
-        callType,
-        date,
-        startTime,
-        endTime,
-        timeZone: clientTz || 'UTC',
-        meetingLink,
-        calendarEventId,
-        status: 'CONFIRMED',
-        qualification: qualification
-          ? {
-              create: {
-                problem: qualification.problem || '',
-                budgetRange: qualification.budgetRange || '',
-                timeline: qualification.timeline || '',
-                workedWithAgencyBefore: qualification.workedWithAgencyBefore || '',
-              },
-            }
-          : undefined,
-      },
-      include: { qualification: true },
+    const booking = await createBookingData({
+      clientName,
+      email,
+      phone,
+      company: company || '',
+      discussionTopic: discussionTopic || '',
+      callType,
+      date,
+      startTime,
+      endTime,
+      timeZone: clientTz || 'UTC',
+      meetingLink,
+      calendarEventId,
+      status: 'CONFIRMED',
+      qualification: qualification
+        ? {
+            problem: qualification.problem || '',
+            budgetRange: qualification.budgetRange || '',
+            timeline: qualification.timeline || '',
+            workedWithAgencyBefore: qualification.workedWithAgencyBefore || '',
+          }
+        : undefined,
     });
-
-    void mirrorBookingToSupabase({
-      clientName: booking.clientName,
-      email: booking.email,
-      phone: booking.phone,
-      company: booking.company,
-      callType: booking.callType,
-      date: booking.date,
-      startTime: booking.startTime,
-      meetingLink: booking.meetingLink,
-      discussion: booking.discussionTopic,
-      problem: booking.qualification?.problem,
-      budget: booking.qualification?.budgetRange,
-      timeline: booking.qualification?.timeline,
-      priorAgency: booking.qualification?.workedWithAgencyBefore,
-      clientTimeZone: booking.timeZone,
-    }).catch(error => console.error('Supabase mirror failed:', error));
 
     void Promise.all([
       sendConfirmationEmail({

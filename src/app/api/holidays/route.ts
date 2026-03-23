@@ -1,13 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
+import { createHolidayData, deleteHolidayData, listHolidaysData } from '@/lib/dataStore';
 
 export async function GET() {
   try {
-    const holidays = await prisma.holiday.findMany({
-      orderBy: { date: 'asc' },
-    });
-
-    return NextResponse.json(holidays, {
+    return NextResponse.json(await listHolidaysData(), {
       headers: {
         'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300',
       },
@@ -26,9 +22,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Date is required' }, { status: 400 });
     }
 
-    const holiday = await prisma.holiday.create({
-      data: { date, note: note || '' },
-    });
+    const holiday = await createHolidayData(date, note || '');
 
     return NextResponse.json(holiday, { status: 201 });
   } catch (error) {
@@ -49,9 +43,7 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Holiday id is required' }, { status: 400 });
     }
 
-    await prisma.holiday.delete({
-      where: { id },
-    });
+    await deleteHolidayData(id);
 
     return NextResponse.json({ success: true });
   } catch (error) {
