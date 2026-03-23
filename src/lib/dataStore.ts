@@ -81,11 +81,35 @@ function toSupabaseId(value: string | number) {
   return /^\d+$/.test(value) ? Number(value) : value;
 }
 
+function pickString(...values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+
+  return '';
+}
+
+function pickNumber(...values: unknown[]): number {
+  for (const value of values) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+
+    if (typeof value === 'string' && value.trim().length > 0 && !Number.isNaN(Number(value))) {
+      return Number(value);
+    }
+  }
+
+  return 0;
+}
+
 function mapQualification(raw?: RawQualification | null, booking?: RawBooking | null): AppQualification | undefined {
-  const problem = String(raw?.problem ?? booking?.problem ?? '');
-  const budgetRange = String(raw?.budgetRange ?? booking?.budget ?? '');
-  const timeline = String(raw?.timeline ?? booking?.timeline ?? '');
-  const workedWithAgencyBefore = String(raw?.workedWithAgencyBefore ?? booking?.prior_agency ?? '');
+  const problem = pickString(raw?.problem, booking?.problem);
+  const budgetRange = pickString(raw?.budgetRange, booking?.budget);
+  const timeline = pickString(raw?.timeline, booking?.timeline);
+  const workedWithAgencyBefore = pickString(raw?.workedWithAgencyBefore, booking?.prior_agency);
 
   if (!problem && !budgetRange && !timeline && !workedWithAgencyBefore) {
     return undefined;
@@ -118,29 +142,37 @@ function normalizeTime(raw: unknown): string {
 }
 
 function mapBooking(raw: RawBooking, qualification?: RawQualification | null): AppBooking {
-  const callType = String(raw.callType ?? raw.call_type ?? 'INTRO_15');
-  const startTime = normalizeTime(raw.startTime ?? raw.time);
-  const endTime = normalizeTime(raw.endTime) || addDuration(startTime, callType);
+  const callType = pickString(raw.callType, raw.call_type, 'INTRO_15');
+  const startTime = normalizeTime(
+    pickString(raw.startTime, raw.time)
+  );
+  const endTimeCandidate = normalizeTime(pickString(raw.endTime));
   const mappedQualification = mapQualification(qualification, raw);
+  const clientTimeZone = pickString(raw.timeZone, raw.client_timezone, raw.clientTimeZone, 'UTC');
+  const meetingLink = pickString(raw.meetingLink, raw.meeting_link);
+  const clientName = pickString(raw.clientName, raw.name);
+  const discussionTopic = pickString(raw.discussionTopic, raw.discussion);
+  const status = pickString(raw.status, 'CONFIRMED');
+  const createdAt = pickString(raw.createdAt, raw.created_at, new Date().toISOString());
 
   return {
     id: String(raw.id ?? ''),
-    clientName: String(raw.clientName ?? raw.name ?? ''),
-    email: String(raw.email ?? ''),
-    phone: String(raw.phone ?? ''),
-    company: String(raw.company ?? ''),
-    discussionTopic: String(raw.discussionTopic ?? raw.discussion ?? ''),
+    clientName,
+    email: pickString(raw.email),
+    phone: pickString(raw.phone),
+    company: pickString(raw.company),
+    discussionTopic,
     callType,
-    date: String(raw.date ?? ''),
+    date: pickString(raw.date),
     startTime,
-    endTime: endTime === '00:00' && startTime !== '00:00' ? addDuration(startTime, callType) : endTime,
-    timeZone: String(raw.timeZone ?? raw.client_timezone ?? raw.clientTimeZone ?? 'UTC'),
-    meetingLink: String(raw.meetingLink ?? raw.meeting_link ?? ''),
-    calendarEventId: String(raw.calendarEventId ?? ''),
-    status: String(raw.status ?? 'CONFIRMED'),
-    rescheduleCount: Number(raw.rescheduleCount ?? 0),
-    createdAt: String(raw.createdAt ?? raw.created_at ?? new Date().toISOString()),
-    updatedAt: raw.updatedAt ? String(raw.updatedAt) : raw.updated_at ? String(raw.updated_at) : undefined,
+    endTime: endTimeCandidate === '00:00' && startTime !== '00:00' ? addDuration(startTime, callType) : endTimeCandidate,
+    timeZone: clientTimeZone,
+    meetingLink,
+    calendarEventId: pickString(raw.calendarEventId),
+    status,
+    rescheduleCount: pickNumber(raw.rescheduleCount),
+    createdAt,
+    updatedAt: pickString(raw.updatedAt, raw.updated_at) || undefined,
     qualification: mappedQualification,
   };
 }
