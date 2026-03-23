@@ -1,18 +1,14 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { BookingResponse, AnalyticsData } from '@/lib/types';
 import { formatTime12h, formatDate } from '@/lib/utils';
-import {
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Area,
-  AreaChart,
-} from 'recharts';
+
+const AdminAnalyticsPanel = dynamic(() => import('@/components/AdminAnalyticsPanel'), {
+  loading: () => <div className="skeleton" style={{ height: 360, borderRadius: 12 }} />,
+});
 
 function callLabel(type: string): string {
   return type === 'INTRO_15'
@@ -23,6 +19,14 @@ function callLabel(type: string): string {
 }
 
 type Tab = 'upcoming' | 'past' | 'analytics' | 'holidays';
+
+type DashboardPayload = {
+  holidayMode: boolean;
+  holidays: { id: string; date: string; note: string }[];
+  analytics: AnalyticsData | null;
+  bookings: BookingResponse[];
+  totalCount: number;
+};
 
 export default function AdminDashboard() {
   const [tab, setTab] = useState<Tab>('upcoming');
@@ -36,7 +40,6 @@ export default function AdminDashboard() {
   const [bookingsLoading, setBookingsLoading] = useState(false);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [analyticsLoaded, setAnalyticsLoaded] = useState(false);
-  const [analyticsSummaryLoading, setAnalyticsSummaryLoading] = useState(true);
   const [showHolidayModal, setShowHolidayModal] = useState(false);
   const [newHoliday, setNewHoliday] = useState({ date: '', note: '' });
   const [page, setPage] = useState(0);
@@ -54,89 +57,64 @@ export default function AdminDashboard() {
     const timer = setTimeout(() => {
       setDebouncedSearch(search);
       setPage(0);
-    }, 500);
+    }, 300);
 
     return () => clearTimeout(timer);
   }, [search]);
 
   const today = new Date().toISOString().split('T')[0];
 
-  const fetchBookings = async (offset: number, query: string) => {
+  async function fetchDashboard(offset: number, query: string) {
     setBookingsLoading(true);
 
     try {
-      const res = await fetch(`/api/bookings?limit=${limit}&offset=${offset}&q=${encodeURIComponent(query)}`);
-      const data = await res.json();
+      const res = await fetch(`/api/admin/dashboard?limit=${limit}&offset=${offset}&q=${encodeURIComponent(query)}`);
+      const data: DashboardPayload = await res.json();
+
       setBookings(data.bookings || []);
       setTotalBookings(data.totalCount || 0);
+      setHolidays(data.holidays || []);
+      setHolidayMode(Boolean(data.holidayMode));
+      setAnalytics(data.analytics || null);
     } catch (err) {
-      console.error('Failed to fetch bookings:', err);
+      console.error('Failed to fetch admin dashboard:', err);
+      setBookings([]);
+      setTotalBookings(0);
+      setHolidays([]);
+      setHolidayMode(false);
+      setAnalytics(null);
     } finally {
       setBookingsLoading(false);
     }
-  };
+  }
 
-  const fetchHolidays = async () => {
-    const res = await fetch('/api/holidays');
-    const data = await res.json();
-    setHolidays(data);
-  };
-
-  const fetchSettings = async () => {
-    const res = await fetch('/api/settings');
-    const data = await res.json();
-    setHolidayMode(data.holidayMode);
-  };
-
-  const fetchAnalyticsSummary = async () => {
-    setAnalyticsSummaryLoading(true);
-
-    try {
-      const res = await fetch('/api/analytics');
-      const data = await res.json();
-      setAnalytics(data);
-    } catch (err) {
-      console.error('Failed to fetch analytics summary:', err);
-      setAnalytics(null);
-    } finally {
-      setAnalyticsSummaryLoading(false);
-    }
-  };
-
-  const fetchAnalytics = async () => {
+  async function fetchAnalyticsDetails() {
     setAnalyticsLoading(true);
 
     try {
-      if (!analytics) {
-        const res = await fetch('/api/analytics');
-        const data = await res.json();
-        setAnalytics(data);
-      }
-
       const resDaily = await fetch('/api/analytics/daily');
       const dataDaily = await resDaily.json();
       setDailyData(dataDaily);
       setAnalyticsLoaded(true);
     } catch (err) {
-      console.error('Failed to fetch analytics:', err);
+      console.error('Failed to fetch analytics details:', err);
     } finally {
       setAnalyticsLoading(false);
     }
-  };
+  }
 
   useEffect(() => {
-    void fetchAnalyticsSummary();
-
-    Promise.all([fetchSettings(), fetchHolidays()])
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => {
-    if (!loading) {
-      fetchBookings(page * limit, debouncedSearch);
+    const initialLoad = page === 0 && debouncedSearch === '';
+    if (initialLoad) {
+      setLoading(true);
     }
-  }, [page, debouncedSearch, loading]);
+
+    void fetchDashboard(page * limit, debouncedSearch).finally(() => {
+      if (initialLoad) {
+        setLoading(false);
+      }
+    });
+  }, [page, debouncedSearch]);
 
   async function toggleHolidayMode() {
     const nextMode = !holidayMode;
@@ -163,7 +141,8 @@ export default function AdminDashboard() {
     });
 
     if (res.ok) {
-      fetchHolidays();
+      const created = await res.json();
+      setHolidays(prev => [...prev, created].sort((a, b) => a.date.localeCompare(b.date)));
       setShowHolidayModal(false);
       setNewHoliday({ date: '', note: '' });
     }
@@ -177,7 +156,7 @@ export default function AdminDashboard() {
     });
 
     if (res.ok) {
-      fetchHolidays();
+      setHolidays(prev => prev.filter(holiday => holiday.id !== id));
     }
   }
 
@@ -281,11 +260,7 @@ export default function AdminDashboard() {
       )}
 
       <div className="admin-stats">
-        {analyticsSummaryLoading ? (
-          <>
-            {[1, 2, 3, 4].map(i => <div key={i} className="skeleton stat-card" style={{ height: 100 }} />)}
-          </>
-        ) : !analytics ? (
+        {!analytics ? (
           <>
             <div className="stat-card">
               <div className="stat-value">0</div>
@@ -374,7 +349,7 @@ export default function AdminDashboard() {
           onClick={() => {
             setTab('analytics');
             if (!analyticsLoaded && !analyticsLoading) {
-              fetchAnalytics();
+              void fetchAnalyticsDetails();
             }
           }}
         >
@@ -500,139 +475,7 @@ export default function AdminDashboard() {
       )}
 
       {tab === 'analytics' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          {analyticsLoading && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {[1, 2, 3].map(i => <div key={i} className="skeleton" style={{ height: 120, borderRadius: 12 }} />)}
-            </div>
-          )}
-          {!analyticsLoading && !analytics && (
-            <div className="empty-state">
-              <div className="emoji">Data</div>
-              <p>No analytics data available yet</p>
-            </div>
-          )}
-          {!analyticsLoading && analytics && (
-            <>
-              <div className="card stats-graph-container">
-                <h3>Bookings Over Time</h3>
-                <div className="chart-wrapper">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={dailyData}>
-                      <defs>
-                        <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="var(--accent-primary)" stopOpacity={0.3} />
-                          <stop offset="95%" stopColor="var(--accent-primary)" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-                      <XAxis
-                        dataKey="displayDate"
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fill: 'var(--text-muted)', fontSize: 11 }}
-                        interval={4}
-                      />
-                      <YAxis
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fill: 'var(--text-muted)', fontSize: 11 }}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          background: 'var(--bg-card)',
-                          border: '1px solid var(--border)',
-                          borderRadius: '8px',
-                          fontSize: '12px',
-                          color: 'var(--text-primary)',
-                        }}
-                        itemStyle={{ color: 'var(--accent-primary)' }}
-                      />
-                      <Area
-                        type="monotone"
-                        dataKey="count"
-                        stroke="var(--accent-primary)"
-                        strokeWidth={3}
-                        fillOpacity={1}
-                        fill="url(#colorCount)"
-                        dot={{ fill: 'var(--accent-primary)', strokeWidth: 2, r: 4, stroke: 'var(--bg-primary)' }}
-                        activeDot={{ r: 6, strokeWidth: 0 }}
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              <div className="analytics-grid">
-                <div className="analytics-card">
-                  <h3>Popular Time Slots</h3>
-                  {analytics.popularSlots.length === 0 ? (
-                    <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>No data yet</p>
-                  ) : (
-                    <div className="bar-chart">
-                      {analytics.popularSlots.map(slot => {
-                        const max = Math.max(...analytics.popularSlots.map(s => s.count));
-                        return (
-                          <div key={slot.time} className="bar-row">
-                            <span className="bar-label">{formatTime12h(slot.time)}</span>
-                            <div className="bar-track">
-                              <div className="bar-fill" style={{ width: `${(slot.count / max) * 100}%` }} />
-                            </div>
-                            <span className="bar-value">{slot.count}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                <div className="analytics-card">
-                  <h3>Bookings by Type</h3>
-                  {analytics.bookingsByType.length === 0 ? (
-                    <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>No data yet</p>
-                  ) : (
-                    <div className="bar-chart">
-                      {analytics.bookingsByType.map(item => {
-                        const max = Math.max(...analytics.bookingsByType.map(s => s.count));
-                        return (
-                          <div key={item.type} className="bar-row">
-                            <span className="bar-label" style={{ width: '100px' }}>{callLabel(item.type)}</span>
-                            <div className="bar-track">
-                              <div className="bar-fill" style={{ width: `${(item.count / max) * 100}%` }} />
-                            </div>
-                            <span className="bar-value">{item.count}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                <div className="analytics-card">
-                  <h3>Status Breakdown</h3>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                    <div style={{ textAlign: 'center' }}>
-                      <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--success)' }}>{analytics.completedBookings}</div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' as const }}>Completed</div>
-                    </div>
-                    <div style={{ textAlign: 'center' }}>
-                      <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--danger)' }}>{analytics.cancelledBookings}</div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' as const }}>Cancelled</div>
-                    </div>
-                    <div style={{ textAlign: 'center' }}>
-                      <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--warning)' }}>{analytics.noShowBookings}</div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' as const }}>No Shows</div>
-                    </div>
-                    <div style={{ textAlign: 'center' }}>
-                      <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--accent-primary)' }}>{analytics.upcomingBookings}</div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' as const }}>Upcoming</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
-        </div>
+        <AdminAnalyticsPanel analytics={analytics} analyticsLoading={analyticsLoading} dailyData={dailyData} />
       )}
 
       {tab === 'holidays' && (

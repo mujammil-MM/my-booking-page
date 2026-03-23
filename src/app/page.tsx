@@ -52,16 +52,15 @@ export default function BookingPage() {
     if (tz) setTimeZone(tz);
 
     setLoadingSettings(true);
-    // Fetch holidays and settings in parallel (with caching)
-    Promise.all([
-      fetch('/api/holidays', { next: { revalidate: 300 } } as RequestInit).then(r => r.json()),
-      fetch('/api/settings', { next: { revalidate: 300 } } as RequestInit).then(r => r.json()),
-    ]).then(([holidaysData, settingsData]) => {
-      setHolidays(holidaysData || []);
-      setHolidayMode(settingsData.holidayMode || false);
+    fetch('/api/bootstrap', { next: { revalidate: 300 } } as RequestInit)
+      .then(r => r.json())
+      .then(data => {
+      const holidaysData = data.holidays || [];
+      setHolidays(holidaysData);
+      setHolidayMode(Boolean(data.holidayMode));
 
       const todayStr = new Date().toISOString().split('T')[0];
-      const foundToday = (holidaysData || []).some((h: { date: string }) => h.date === todayStr);
+      const foundToday = holidaysData.some((h: { date: string }) => h.date === todayStr);
       setIsHolidayToday(foundToday);
     }).catch(() => {
       // Non-fatal: silently continue if settings fail to load
