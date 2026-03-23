@@ -4,6 +4,10 @@ import { sendReminderEmail } from '@/lib/email';
 import prisma from '@/lib/prisma';
 import { supabaseAdmin } from '@/lib/supabaseShared';
 
+function toSupabaseId(value: string) {
+  return /^\d+$/.test(value) ? Number(value) : value;
+}
+
 async function hasReminderLog(bookingId: string, scheduledFor: string) {
   if (!supabaseAdmin) {
     const existingLog = await prisma.reminderLog.findFirst({
@@ -20,7 +24,7 @@ async function hasReminderLog(bookingId: string, scheduledFor: string) {
   const result = await supabaseAdmin
     .from('reminder_logs')
     .select('id')
-    .eq('bookingId', bookingId)
+    .eq('bookingId', toSupabaseId(bookingId))
     .eq('scheduledFor', scheduledFor)
     .maybeSingle();
 
@@ -46,7 +50,7 @@ async function createReminderLog(bookingId: string, scheduledFor: string) {
   }
 
   const result = await supabaseAdmin.from('reminder_logs').insert({
-    bookingId,
+    bookingId: toSupabaseId(bookingId),
     type: 'EMAIL',
     scheduledFor,
     sentAt: new Date().toISOString(),

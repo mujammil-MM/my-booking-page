@@ -73,6 +73,14 @@ function useSupabaseStore(): boolean {
   return Boolean(supabaseReadClient);
 }
 
+function toSupabaseId(value: string | number) {
+  if (typeof value === 'number') {
+    return value;
+  }
+
+  return /^\d+$/.test(value) ? Number(value) : value;
+}
+
 function mapQualification(raw?: RawQualification | null, booking?: RawBooking | null): AppQualification | undefined {
   const problem = String(raw?.problem ?? booking?.problem ?? '');
   const budgetRange = String(raw?.budgetRange ?? booking?.budget ?? '');
@@ -145,7 +153,7 @@ async function fetchQualificationMap(bookingIds: string[]): Promise<Record<strin
   const { data, error } = await supabaseReadClient
     .from('qualification_answers')
     .select('*')
-    .in('bookingId', bookingIds);
+    .in('bookingId', bookingIds.map(toSupabaseId));
 
   if (error || !data) {
     return {};
@@ -302,7 +310,11 @@ export async function getBookingData(id: string): Promise<AppBooking | null> {
     };
   }
 
-  const { data, error } = await supabaseReadClient!.from('bookings').select('*').eq('id', id).maybeSingle();
+  const { data, error } = await supabaseReadClient!
+    .from('bookings')
+    .select('*')
+    .eq('id', toSupabaseId(id))
+    .maybeSingle();
   if (error || !data) {
     return null;
   }
@@ -627,7 +639,7 @@ export async function updateBookingData(id: string, data: Partial<AppBooking> & 
       ...(data.status ? { status: data.status } : {}),
       ...(typeof data.rescheduleCount === 'number' ? { rescheduleCount: data.rescheduleCount } : {}),
     })
-    .eq('id', id);
+    .eq('id', toSupabaseId(id));
 
   if (modernUpdate.error) {
     const legacyUpdate = await supabaseAdmin
@@ -637,7 +649,7 @@ export async function updateBookingData(id: string, data: Partial<AppBooking> & 
         ...(data.startTime ? { time: `${data.startTime}:00` } : {}),
         ...(data.timeZone ? { client_timezone: data.timeZone } : {}),
       })
-      .eq('id', id);
+      .eq('id', toSupabaseId(id));
 
     if (legacyUpdate.error) {
       throw legacyUpdate.error;
