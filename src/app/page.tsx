@@ -47,6 +47,13 @@ export default function BookingPage() {
   const [isHolidayToday, setIsHolidayToday] = useState(false);
   const [loadingSettings, setLoadingSettings] = useState(true);
 
+  const toLocalDateString = (date: Date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   useEffect(() => {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
     if (tz) setTimeZone(tz);
@@ -59,7 +66,7 @@ export default function BookingPage() {
       setHolidays(holidaysData);
       setHolidayMode(Boolean(data.holidayMode));
 
-      const todayStr = new Date().toISOString().split('T')[0];
+      const todayStr = toLocalDateString(new Date());
       const foundToday = holidaysData.some((h: { date: string }) => h.date === todayStr);
       setIsHolidayToday(foundToday);
     }).catch(() => {

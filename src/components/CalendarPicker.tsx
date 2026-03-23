@@ -12,10 +12,17 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
+function toLocalDateString(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 const CalendarPicker = memo(({ selectedDate, onSelectDate, blockedDates = [] }: Props) => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const todayStr = today.toISOString().split('T')[0];
+  const todayStr = toLocalDateString(today);
 
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
@@ -50,7 +57,7 @@ const CalendarPicker = memo(({ selectedDate, onSelectDate, blockedDates = [] }: 
   // Days
   for (let d = 1; d <= daysInMonthCount; d++) {
     const date = new Date(viewYear, viewMonth, d);
-    const dateStr = date.toISOString().split('T')[0];
+    const dateStr = toLocalDateString(date);
     const isPast = date < today;
     const isSelected = selectedDate === dateStr;
     const isToday = todayStr === dateStr;

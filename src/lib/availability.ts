@@ -1,6 +1,6 @@
 import { getCallDuration, CallType, TimeSlot } from './types';
 import { listBookingsForAvailability } from './dataStore';
-import { toDate, toZonedTime } from 'date-fns-tz';
+import { formatInTimeZone, toDate, toZonedTime } from 'date-fns-tz';
 import { addDays, addHours, addMinutes, format } from 'date-fns';
 
 const WORKING_START = parseInt(process.env.WORKING_HOURS_START || '10', 10);
@@ -69,7 +69,7 @@ export async function getAvailableSlots(
     });
 
     slots.push({
-      time: format(slotStartClient, 'HH:mm'),
+      time: formatInTimeZone(slotStartClient, clientTimeZone, 'HH:mm'),
       available: !isBlocked,
     });
   }
