@@ -141,14 +141,55 @@ function normalizeTime(raw: unknown): string {
   return raw.slice(0, 5);
 }
 
+function resolveCallType(raw: RawBooking): string {
+  const modern = pickString(raw.callType);
+  const legacy = pickString(raw.call_type);
+
+  if (modern && modern !== 'INTRO_15') {
+    return modern;
+  }
+
+  return legacy || modern || 'INTRO_15';
+}
+
+function resolveStartTime(raw: RawBooking): string {
+  const modern = normalizeTime(raw.startTime);
+  const legacy = normalizeTime(raw.time);
+
+  if (modern !== '00:00') {
+    return modern;
+  }
+
+  return legacy !== '00:00' ? legacy : modern;
+}
+
+function resolveEndTime(raw: RawBooking, startTime: string, callType: string): string {
+  const modern = normalizeTime(raw.endTime);
+
+  if (modern !== '00:00') {
+    return modern;
+  }
+
+  return startTime !== '00:00' ? addDuration(startTime, callType) : modern;
+}
+
+function resolveTimeZone(raw: RawBooking): string {
+  const modern = pickString(raw.timeZone);
+  const legacy = pickString(raw.client_timezone, raw.clientTimeZone);
+
+  if (modern && modern !== 'UTC') {
+    return modern;
+  }
+
+  return legacy || modern || 'UTC';
+}
+
 function mapBooking(raw: RawBooking, qualification?: RawQualification | null): AppBooking {
-  const callType = pickString(raw.callType, raw.call_type, 'INTRO_15');
-  const startTime = normalizeTime(
-    pickString(raw.startTime, raw.time)
-  );
-  const endTimeCandidate = normalizeTime(pickString(raw.endTime));
+  const callType = resolveCallType(raw);
+  const startTime = resolveStartTime(raw);
+  const endTimeCandidate = resolveEndTime(raw, startTime, callType);
   const mappedQualification = mapQualification(qualification, raw);
-  const clientTimeZone = pickString(raw.timeZone, raw.client_timezone, raw.clientTimeZone, 'UTC');
+  const clientTimeZone = resolveTimeZone(raw);
   const meetingLink = pickString(raw.meetingLink, raw.meeting_link);
   const clientName = pickString(raw.clientName, raw.name);
   const discussionTopic = pickString(raw.discussionTopic, raw.discussion);
@@ -165,7 +206,7 @@ function mapBooking(raw: RawBooking, qualification?: RawQualification | null): A
     callType,
     date: pickString(raw.date),
     startTime,
-    endTime: endTimeCandidate === '00:00' && startTime !== '00:00' ? addDuration(startTime, callType) : endTimeCandidate,
+    endTime: endTimeCandidate,
     timeZone: clientTimeZone,
     meetingLink,
     calendarEventId: pickString(raw.calendarEventId),
